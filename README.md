@@ -45,18 +45,18 @@ All bot-created users will be added to this inbound, so every user receives the 
 
 Current ANDREVPN inbound settings:
 
-- Inbound ID: `2`
+- Inbound ID: `4`
 - Protocol: `VLESS`
-- Transport: `RAW`
-- Security: `reality`
-- Port: `55804`
+- Transport: `XHTTP`
+- Security: `none`
+- Port: `16347`
 - User traffic limit: `107374182400` bytes, about 100 GB
 
-For HAPP, it is best to enable the 3X-UI subscription service and put its public base URL into
-`VPN_SUBSCRIPTION_BASE_URL`, for example:
+For HAPP, use the bot subscription endpoint and put its public base URL into
+`VPN_SUBSCRIPTION_BASE_URL`:
 
 ```env
-VPN_SUBSCRIPTION_BASE_URL=https://panel-l.andreev-it.ru:2096/user/
+VPN_SUBSCRIPTION_BASE_URL=https://panel-l.andreev-it.ru:2097/sub
 ```
 
 The bot will show users a personal subscription link based on their `subId`.

@@ -85,22 +85,31 @@ def connection_text(user: User, config: Config) -> str:
 def build_vless_reality_link(user: User, config: Config) -> str:
     if not user.xui_uuid:
         return ""
-    if not (config.vpn_public_host and config.vless_port and config.reality_public_key):
+    if not (config.vpn_public_host and config.vless_port):
         return ""
 
-    params = {
-        "type": config.vless_transport_type,
-        "security": "reality",
-        "encryption": "none",
-        "pbk": config.reality_public_key,
-        "fp": config.reality_fingerprint,
-        "sni": config.reality_server_name,
-        "spx": config.reality_spider_x,
-    }
-    if config.reality_short_id:
-        params["sid"] = config.reality_short_id
-    if config.reality_pqv:
-        params["pqv"] = config.reality_pqv
+    params = {"type": config.vless_transport_type, "encryption": "none"}
+    if config.vless_transport_type == "xhttp":
+        params.update({
+            "security": "none",
+            "path": config.xhttp_path,
+            "mode": config.xhttp_mode,
+        })
+    elif config.reality_public_key:
+        params.update({
+            "security": "reality",
+            "pbk": config.reality_public_key,
+            "fp": config.reality_fingerprint,
+            "sni": config.reality_server_name,
+            "spx": config.reality_spider_x,
+        })
+        if config.reality_short_id:
+            params["sid"] = config.reality_short_id
+        if config.reality_pqv:
+            params["pqv"] = config.reality_pqv
+    else:
+        params["security"] = "none"
+
     if config.xui_client_flow:
         params["flow"] = config.xui_client_flow
 

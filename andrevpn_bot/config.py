@@ -39,12 +39,18 @@ class Config:
     vpn_public_host: str
     vless_port: int | None
     vless_transport_type: str
+    xhttp_path: str
+    xhttp_mode: str
     reality_public_key: str
     reality_short_id: str
     reality_pqv: str
     reality_server_name: str
     reality_fingerprint: str
     reality_spider_x: str
+    subscription_listen_host: str
+    subscription_port: int | None
+    subscription_cert_file: str
+    subscription_key_file: str
     support_username: str
 
 
@@ -78,12 +84,18 @@ def load_config() -> Config:
         vpn_public_host=_env("VPN_PUBLIC_HOST"),
         vless_port=_parse_optional_int(_env("VLESS_PORT")),
         vless_transport_type=_env("VLESS_TRANSPORT_TYPE", "raw"),
+        xhttp_path=_env("XHTTP_PATH", "/"),
+        xhttp_mode=_env("XHTTP_MODE", "auto"),
         reality_public_key=_env("REALITY_PUBLIC_KEY"),
         reality_short_id=_env("REALITY_SHORT_ID"),
         reality_pqv=_env("REALITY_PQV"),
         reality_server_name=_env("REALITY_SERVER_NAME", "www.cloudflare.com"),
         reality_fingerprint=_env("REALITY_FINGERPRINT", "chrome"),
         reality_spider_x=_env("REALITY_SPIDER_X", "/"),
+        subscription_listen_host=_env("SUBSCRIPTION_LISTEN_HOST", "0.0.0.0"),
+        subscription_port=_parse_optional_int(_env("SUBSCRIPTION_PORT")),
+        subscription_cert_file=_env("SUBSCRIPTION_CERT_FILE"),
+        subscription_key_file=_env("SUBSCRIPTION_KEY_FILE"),
         support_username=_env("SUPPORT_USERNAME").lstrip("@"),
     )
 
