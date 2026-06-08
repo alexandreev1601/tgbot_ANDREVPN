@@ -43,7 +43,7 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
     @router.callback_query(F.data == "connection")
     async def connection_handler(callback: CallbackQuery) -> None:
         user = _touch_user(callback, db)
-        if user.is_active and not user.xui_sub_id:
+        if user.is_active:
             try:
                 await xui.provision_user(db, user)
                 user = db.get_user(user.telegram_id)

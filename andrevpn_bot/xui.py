@@ -32,9 +32,10 @@ class XuiApi:
         if not self._is_configured:
             return None
 
-        inbound_id = user.xui_inbound_id or await self._resolve_inbound_id()
-        client_uuid = user.xui_uuid or str(uuid.uuid4())
-        sub_id = user.xui_sub_id or secrets.token_urlsafe(12).replace("_", "").replace("-", "").lower()
+        inbound_id = await self._resolve_inbound_id()
+        reuse_saved_client = user.xui_inbound_id == inbound_id
+        client_uuid = user.xui_uuid if reuse_saved_client and user.xui_uuid else str(uuid.uuid4())
+        sub_id = user.xui_sub_id if reuse_saved_client and user.xui_sub_id else _new_sub_id()
         email = user.xui_email or f"tg_{user.telegram_id}"
 
         client = XuiClient(inbound_id=inbound_id, email=email, uuid=client_uuid, sub_id=sub_id)
@@ -219,3 +220,7 @@ def _looks_successful(response: httpx.Response) -> bool:
     if isinstance(data, dict):
         return data.get("success") is not False
     return True
+
+
+def _new_sub_id() -> str:
+    return secrets.token_urlsafe(12).replace("_", "").replace("-", "").lower()
