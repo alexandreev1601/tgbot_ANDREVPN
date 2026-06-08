@@ -58,7 +58,10 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
     @router.callback_query(F.data == "plans")
     async def plans_handler(callback: CallbackQuery) -> None:
         _touch_user(callback, db)
-        await callback.message.edit_text("<b>Выберите срок подписки</b>", reply_markup=plans_menu(config.plans))
+        await callback.message.edit_text(
+            "<b>Выберите срок подписки</b>",
+            reply_markup=plans_menu(config.plans, config.payment_currency),
+        )
         await callback.answer()
 
     @router.callback_query(F.data.startswith("pay:"))
@@ -66,7 +69,8 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         user = _touch_user(callback, db)
         plan = _find_plan(config.plans, callback.data.split(":", 1)[1])
 
-        if not config.payment_provider_token:
+        is_stars_payment = config.payment_currency.upper() == "XTR"
+        if not is_stars_payment and not config.payment_provider_token:
             text = (
                 "<b>Оплата пока не подключена</b>\n\n"
                 "Тариф выбран, но платёжный токен ещё не указан в настройках бота. "
@@ -77,14 +81,17 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
             await _notify_admins(callback.message.bot, config, f"User {user.telegram_id} wants to pay for {plan.title}")
             return
 
-        await callback.message.answer_invoice(
-            title=f"{config.payment_title}: {plan.title}",
-            description=f"{config.payment_description}. Срок: {plan.days} дней.",
-            payload=f"plan:{plan.code}",
-            provider_token=config.payment_provider_token,
-            currency=config.payment_currency,
-            prices=[LabeledPrice(label=plan.title, amount=_telegram_amount(plan, config.payment_currency))],
-        )
+        invoice = {
+            "title": f"{config.payment_title}: {plan.title}",
+            "description": f"{config.payment_description}. Срок: {plan.days} дней.",
+            "payload": f"plan:{plan.code}",
+            "currency": config.payment_currency,
+            "prices": [LabeledPrice(label=plan.title, amount=_telegram_amount(plan, config.payment_currency))],
+        }
+        if not is_stars_payment:
+            invoice["provider_token"] = config.payment_provider_token
+
+        await callback.message.answer_invoice(**invoice)
         await callback.answer()
 
     @router.pre_checkout_query()
@@ -155,4 +162,3 @@ async def _notify_admins(bot, config: Config, text: str) -> None:
             await bot.send_message(admin_id, text)
         except Exception:
             pass
-

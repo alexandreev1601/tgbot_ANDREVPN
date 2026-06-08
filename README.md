@@ -63,15 +63,23 @@ The bot will show users a personal subscription link based on their `subId`.
 
 ## Payments
 
-The bot supports Telegram Payments. Add your provider token to:
+The bot supports Telegram Payments. By default, payments use Telegram Stars:
+
+```env
+PAYMENT_CURRENCY=XTR
+PAYMENT_PROVIDER_TOKEN=
+```
+
+For fiat payments, switch the currency and add a provider token:
 
 ```env
 PAYMENT_PROVIDER_TOKEN=...
 PAYMENT_CURRENCY=RUB
 ```
 
-If `PAYMENT_PROVIDER_TOKEN` is empty, the bot will show payment options as unavailable and will ask the
-user to contact the administrator.
+If `PAYMENT_CURRENCY=XTR`, `PAYMENT_PROVIDER_TOKEN` must stay empty. If another currency is used and
+`PAYMENT_PROVIDER_TOKEN` is empty, the bot will show payment options as unavailable and will ask the user
+to contact the administrator.
 
 ### What is a payment provider token?
 
@@ -88,7 +96,8 @@ Typical setup:
 5. Connect your merchant account.
 6. Copy the provider token into `PAYMENT_PROVIDER_TOKEN`.
 
-Without this token, the bot can show tariffs but cannot accept automatic payments.
+Without this token, the bot can still accept Telegram Stars payments, but cannot accept automatic fiat
+payments.
 
 ## Server Deploy From GitHub
 

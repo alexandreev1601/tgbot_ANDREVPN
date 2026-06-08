@@ -16,9 +16,10 @@ def main_menu() -> InlineKeyboardMarkup:
     )
 
 
-def plans_menu(plans: list[Plan]) -> InlineKeyboardMarkup:
+def plans_menu(plans: list[Plan], currency: str) -> InlineKeyboardMarkup:
+    currency_label = "XTR" if currency.upper() == "XTR" else "₽"
     rows = [
-        [InlineKeyboardButton(text=f"{plan.title} - {plan.price} ₽", callback_data=f"pay:{plan.code}")]
+        [InlineKeyboardButton(text=f"{plan.title} - {plan.price} {currency_label}", callback_data=f"pay:{plan.code}")]
         for plan in plans
     ]
     rows.append([InlineKeyboardButton(text="Назад", callback_data="home")])
@@ -29,4 +30,3 @@ def back_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="Назад", callback_data="home")]]
     )
-
