@@ -53,22 +53,22 @@ def connection_text(user: User, config: Config) -> str:
             "Сначала оплатите или продлите подписку. После активации здесь появится персональная ссылка."
         )
 
+    if user.xui_sub_id and config.vpn_subscription_base_url:
+        link = f"{config.vpn_subscription_base_url}/{user.xui_sub_id}"
+        return (
+            "<b>Подключение ANDREVPN</b>\n\n"
+            "Ваша персональная ссылка подписки для HAPP:\n"
+            f"<code>{link}</code>\n\n"
+            "Удалите старый профиль, затем добавьте эту ссылку в HAPP как подписку и обновите её."
+        )
+
     direct_link = build_vless_reality_link(user, config)
     if direct_link:
         return (
             "<b>Подключение ANDREVPN</b>\n\n"
             "Ваша персональная ссылка для HAPP:\n"
             f"<code>{direct_link}</code>\n\n"
-            "Скопируйте её и импортируйте в HAPP как профиль или подписку."
-        )
-
-    if user.xui_sub_id and config.vpn_subscription_base_url:
-        link = f"{config.vpn_subscription_base_url}/{user.xui_sub_id}"
-        return (
-            "<b>Подключение ANDREVPN</b>\n\n"
-            "Ваша персональная ссылка для HAPP:\n"
-            f"<code>{link}</code>\n\n"
-            "Скопируйте её и добавьте в HAPP как подписку."
+            "Скопируйте её и импортируйте в HAPP как профиль."
         )
 
     if not user.xui_sub_id:
