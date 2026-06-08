@@ -41,6 +41,7 @@ class Config:
     vless_transport_type: str
     reality_public_key: str
     reality_short_id: str
+    reality_pqv: str
     reality_server_name: str
     reality_fingerprint: str
     reality_spider_x: str
@@ -79,6 +80,7 @@ def load_config() -> Config:
         vless_transport_type=_env("VLESS_TRANSPORT_TYPE", "raw"),
         reality_public_key=_env("REALITY_PUBLIC_KEY"),
         reality_short_id=_env("REALITY_SHORT_ID"),
+        reality_pqv=_env("REALITY_PQV"),
         reality_server_name=_env("REALITY_SERVER_NAME", "www.cloudflare.com"),
         reality_fingerprint=_env("REALITY_FINGERPRINT", "chrome"),
         reality_spider_x=_env("REALITY_SPIDER_X", "/"),

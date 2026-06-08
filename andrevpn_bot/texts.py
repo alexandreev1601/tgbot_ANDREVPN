@@ -99,6 +99,8 @@ def build_vless_reality_link(user: User, config: Config) -> str:
     }
     if config.reality_short_id:
         params["sid"] = config.reality_short_id
+    if config.reality_pqv:
+        params["pqv"] = config.reality_pqv
     if config.xui_client_flow:
         params["flow"] = config.xui_client_flow
 
