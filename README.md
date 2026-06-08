@@ -122,7 +122,7 @@ Default tariffs are configured in `.env.example` through `PLANS`.
 Format:
 
 ```env
-PLANS=month:1 месяц:199:30,quarter:3 месяца:499:90,year:1 год:1490:365
+PLANS=month:1 месяц:60:30,two_months:2 месяца:110:60,quarter:3 месяца:150:90
 ```
 
 Each tariff is:
