@@ -65,10 +65,11 @@ The bot will show users a personal subscription link based on their `subId`. If 
 contains several profiles, the same subscription link will return several VLESS nodes, and HAPP will
 let the user choose between them.
 
-Example multi-profile setup:
+Example multi-profile setup. Emoji at the start of `title` is shown by HAPP as a profile icon,
+while the visible name stays short: `vpn1`, `vpn2`, `vpn3`.
 
 ```env
-VPN_PROFILES_JSON=[{"code":"xhttp","title":"ANDREVPN XHTTP","inbound_id":4,"host":"panel-l.andreev-it.ru","port":16347,"transport_type":"xhttp","security":"none","xhttp_path":"/","xhttp_mode":"auto"},{"code":"reality_tcp_1","title":"ANDREVPN Reality 1","inbound_id":5,"host":"panel-l.andreev-it.ru","port":443,"transport_type":"tcp","security":"reality","flow":"xtls-rprx-vision","reality_public_key":"...","reality_short_id":"...","reality_server_name":"www.cloudflare.com","reality_fingerprint":"firefox","reality_spider_x":"/"}]
+VPN_PROFILES_JSON=[{"code":"xhttp","title":"🇫🇷 vpn1","inbound_id":4,"host":"panel-l.andreev-it.ru","port":16347,"transport_type":"xhttp","security":"none","xhttp_path":"/","xhttp_mode":"auto"},{"code":"reality_tcp_1","title":"🇺🇸 vpn2","inbound_id":5,"host":"panel-l.andreev-it.ru","port":443,"transport_type":"tcp","security":"reality","flow":"xtls-rprx-vision","reality_public_key":"...","reality_short_id":"...","reality_server_name":"www.cloudflare.com","reality_fingerprint":"firefox","reality_spider_x":"/"},{"code":"reality_tcp_2","title":"🇳🇱 vpn3","inbound_id":6,"host":"panel-l.andreev-it.ru","port":2443,"transport_type":"tcp","security":"reality","flow":"xtls-rprx-vision","reality_public_key":"...","reality_short_id":"...","reality_server_name":"www.cloudflare.com","reality_fingerprint":"firefox","reality_spider_x":"/"}]
 ```
 
 ## Payments
