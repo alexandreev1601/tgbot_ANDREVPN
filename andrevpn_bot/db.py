@@ -56,6 +56,15 @@ class Database:
                     created_at TEXT NOT NULL,
                     raw_payload TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS subscription_reminders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    telegram_id INTEGER NOT NULL,
+                    reminder_key TEXT NOT NULL,
+                    subscription_until TEXT NOT NULL,
+                    sent_at TEXT NOT NULL,
+                    UNIQUE (telegram_id, reminder_key, subscription_until)
+                );
                 """
             )
 
@@ -90,6 +99,20 @@ class Database:
         if row is None:
             raise LookupError(f"User {telegram_id} does not exist")
         return _user_from_row(row)
+
+    def list_active_users(self) -> list[User]:
+        now = _to_iso(datetime.now(UTC))
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM users
+                WHERE subscription_until IS NOT NULL
+                    AND subscription_until > ?
+                ORDER BY subscription_until
+                """,
+                (now,),
+            ).fetchall()
+        return [_user_from_row(row) for row in rows]
 
     def extend_subscription(self, telegram_id: int, days: int) -> User:
         user = self.get_user(telegram_id)
@@ -147,6 +170,34 @@ class Database:
                 ),
             )
 
+    def reminder_was_sent(self, telegram_id: int, reminder_key: str, subscription_until: datetime) -> bool:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM subscription_reminders
+                WHERE telegram_id = ? AND reminder_key = ? AND subscription_until = ?
+                """,
+                (telegram_id, reminder_key, _to_iso(subscription_until)),
+            ).fetchone()
+        return row is not None
+
+    def mark_reminder_sent(self, telegram_id: int, reminder_key: str, subscription_until: datetime) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO subscription_reminders (
+                    telegram_id, reminder_key, subscription_until, sent_at
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    telegram_id,
+                    reminder_key,
+                    _to_iso(subscription_until),
+                    _to_iso(datetime.now(UTC)),
+                ),
+            )
+
 
 def _user_from_row(row: sqlite3.Row) -> User:
     return User(
@@ -172,4 +223,3 @@ def _from_iso(value: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
-

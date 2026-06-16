@@ -9,6 +9,7 @@ Telegram bot for selling and managing ANDREVPN subscriptions with 3X-UI integrat
 - Payment and subscription renewal through Telegram invoices.
 - HAPP setup instructions.
 - 3X-UI client provisioning through one selected inbound/protocol.
+- Automatic subscription expiration reminders 3 days, 1 day, and 1 hour before expiration.
 - SQLite storage for users and payments.
 
 ## Quick Start

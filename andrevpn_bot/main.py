@@ -12,6 +12,7 @@ from aiohttp import web
 from .config import load_config
 from .db import Database
 from .handlers import build_router
+from .reminders import run_subscription_reminders
 from .texts import build_vless_reality_link
 from .xui import XuiApi
 
@@ -28,10 +29,13 @@ async def run() -> None:
     dispatcher.include_router(build_router(config, db, XuiApi(config)))
 
     subscription_runner = await start_subscription_server(config, db)
+    reminder_task = asyncio.create_task(run_subscription_reminders(bot, db))
     logging.info("ANDREVPN bot started")
     try:
         await dispatcher.start_polling(bot)
     finally:
+        reminder_task.cancel()
+        await asyncio.gather(reminder_task, return_exceptions=True)
         if subscription_runner:
             await subscription_runner.cleanup()
 
