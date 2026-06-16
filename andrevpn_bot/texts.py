@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC
 from urllib.parse import quote
 
-from .config import Config
+from .config import Config, VpnProfile
 from .db import User
 
 
@@ -41,8 +41,8 @@ def happ_instruction(config: Config) -> str:
         "3. В HAPP нажмите добавление подписки или профиля.\n"
         "4. Вставьте ссылку, сохраните профиль и обновите подписку.\n"
         "5. Выберите добавленный профиль ANDREVPN и нажмите подключение.\n\n"
-        "Если приложение просит выбрать тип подключения, используйте профиль, который импортировался "
-        "из ссылки ANDREVPN. Все подключения выдаются через один настроенный входящий протокол 3X-UI."
+        "Если после обновления подписки появилось несколько вариантов ANDREVPN, выберите любой доступный "
+        "профиль. Если один вариант работает нестабильно, переключитесь на другой."
     )
 
 
@@ -59,7 +59,8 @@ def connection_text(user: User, config: Config) -> str:
             "<b>Подключение ANDREVPN</b>\n\n"
             "Ваша персональная ссылка подписки для HAPP:\n"
             f"<code>{link}</code>\n\n"
-            "Удалите старый профиль, затем добавьте эту ссылку в HAPP как подписку и обновите её."
+            "Удалите старый профиль, затем добавьте эту ссылку в HAPP как подписку и обновите её. "
+            "Внутри подписки может быть несколько вариантов подключения."
         )
 
     direct_link = build_vless_reality_link(user, config)
@@ -83,39 +84,56 @@ def connection_text(user: User, config: Config) -> str:
 
 
 def build_vless_reality_link(user: User, config: Config) -> str:
+    links = build_vless_links(user, config)
+    return links[0] if links else ""
+
+
+def build_vless_links(user: User, config: Config) -> list[str]:
+    if not user.xui_uuid:
+        return []
+
+    links = []
+    for profile in config.vpn_profiles:
+        link = build_vless_profile_link(user, profile)
+        if link:
+            links.append(link)
+    return links
+
+
+def build_vless_profile_link(user: User, profile: VpnProfile) -> str:
     if not user.xui_uuid:
         return ""
-    if not (config.vpn_public_host and config.vless_port):
+    if not (profile.host and profile.port):
         return ""
 
-    params = {"type": config.vless_transport_type, "encryption": "none"}
-    if config.vless_transport_type == "xhttp":
+    params = {"type": profile.transport_type, "encryption": "none"}
+    if profile.transport_type == "xhttp":
         params.update({
             "security": "none",
-            "path": config.xhttp_path,
-            "mode": config.xhttp_mode,
+            "path": profile.xhttp_path,
+            "mode": profile.xhttp_mode,
         })
-    elif config.reality_public_key:
+    elif profile.security == "reality" and profile.reality_public_key:
         params.update({
             "security": "reality",
-            "pbk": config.reality_public_key,
-            "fp": config.reality_fingerprint,
-            "sni": config.reality_server_name,
-            "spx": config.reality_spider_x,
+            "pbk": profile.reality_public_key,
+            "fp": profile.reality_fingerprint,
+            "sni": profile.reality_server_name,
+            "spx": profile.reality_spider_x,
         })
-        if config.reality_short_id:
-            params["sid"] = config.reality_short_id
-        if config.reality_pqv:
-            params["pqv"] = config.reality_pqv
+        if profile.reality_short_id:
+            params["sid"] = profile.reality_short_id
+        if profile.reality_pqv:
+            params["pqv"] = profile.reality_pqv
     else:
         params["security"] = "none"
 
-    if config.xui_client_flow:
-        params["flow"] = config.xui_client_flow
+    if profile.flow:
+        params["flow"] = profile.flow
 
     query = "&".join(f"{quote(str(key))}={quote(str(value), safe='')}" for key, value in params.items())
-    label = quote(f"ANDREVPN-{user.telegram_id}", safe="")
-    return f"vless://{user.xui_uuid}@{config.vpn_public_host}:{config.vless_port}?{query}#{label}"
+    label = quote(profile.title, safe="")
+    return f"vless://{user.xui_uuid}@{profile.host}:{profile.port}?{query}#{label}"
 
 
 def format_dt(value) -> str:

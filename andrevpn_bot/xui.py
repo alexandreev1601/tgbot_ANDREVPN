@@ -18,6 +18,7 @@ class XuiClient:
     email: str
     uuid: str
     sub_id: str
+    flow: str
 
 
 class XuiError(RuntimeError):
@@ -32,16 +33,41 @@ class XuiApi:
         if not self._is_configured:
             return None
 
-        inbound_id = await self._resolve_inbound_id()
-        reuse_saved_client = user.xui_inbound_id == inbound_id
-        client_uuid = user.xui_uuid if reuse_saved_client and user.xui_uuid else str(uuid.uuid4())
-        sub_id = user.xui_sub_id if reuse_saved_client and user.xui_sub_id else _new_sub_id()
+        inbound_ids = await self._resolve_inbound_ids()
+        if not inbound_ids:
+            raise XuiError("No VPN profiles are configured.")
+
+        client_uuid = user.xui_uuid or str(uuid.uuid4())
+        sub_id = user.xui_sub_id or _new_sub_id()
         email = user.xui_email or f"tg_{user.telegram_id}"
 
-        client = XuiClient(inbound_id=inbound_id, email=email, uuid=client_uuid, sub_id=sub_id)
-        await self._upsert_client(client, user.subscription_until)
-        db.save_xui_client(user.telegram_id, email, client_uuid, sub_id, inbound_id)
-        return client
+        primary_client = None
+        for inbound_id, flow in await self._resolve_inbound_flows():
+            client = XuiClient(inbound_id=inbound_id, email=email, uuid=client_uuid, sub_id=sub_id, flow=flow)
+            await self._upsert_client(client, user.subscription_until)
+            if primary_client is None:
+                primary_client = client
+
+        db.save_xui_client(user.telegram_id, email, client_uuid, sub_id, inbound_ids[0])
+        return primary_client
+
+    async def _resolve_inbound_flows(self) -> list[tuple[int, str]]:
+        if self.config.vpn_profiles:
+            return [(profile.inbound_id, profile.flow) for profile in self.config.vpn_profiles]
+
+        inbound_id = await self._resolve_inbound_id()
+        if inbound_id is None:
+            return []
+        return [(inbound_id, self.config.xui_client_flow)]
+
+    async def _resolve_inbound_ids(self) -> list[int]:
+        if self.config.vpn_profiles:
+            return [profile.inbound_id for profile in self.config.vpn_profiles]
+
+        inbound_id = await self._resolve_inbound_id()
+        if inbound_id is None:
+            return []
+        return [inbound_id]
 
     @property
     def _is_configured(self) -> bool:
@@ -192,7 +218,7 @@ class XuiApi:
         expiry_ms = int(subscription_until.timestamp() * 1000) if subscription_until else 0
         return {
             "id": client_info.uuid,
-            "flow": self.config.xui_client_flow,
+            "flow": client_info.flow,
             "email": client_info.email,
             "limitIp": self.config.xui_limit_ip,
             "totalGB": self.config.xui_total_gb,

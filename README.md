@@ -8,7 +8,7 @@ Telegram bot for selling and managing ANDREVPN subscriptions with 3X-UI integrat
 - User cabinet with subscription expiration date.
 - Payment and subscription renewal through Telegram invoices.
 - HAPP setup instructions.
-- 3X-UI client provisioning through one selected inbound/protocol.
+- 3X-UI client provisioning through one or more selected inbounds/protocols.
 - Automatic subscription expiration reminders 3 days, 1 day, and 1 hour before expiration.
 - SQLite storage for users and payments.
 
@@ -41,8 +41,9 @@ python -m andrevpn_bot
 
 ## 3X-UI Notes
 
-Create or choose one inbound in 3X-UI, for example VLESS. Put its ID into `XUI_INBOUND_ID`.
-All bot-created users will be added to this inbound, so every user receives the same protocol type.
+Create or choose one or more inbounds in 3X-UI, for example VLESS XHTTP and VLESS Reality.
+For one inbound, put its ID into `XUI_INBOUND_ID`. For several variants in one HAPP subscription,
+configure `VPN_PROFILES_JSON`.
 
 Current ANDREVPN inbound settings:
 
@@ -60,7 +61,15 @@ For HAPP, use the bot subscription endpoint and put its public base URL into
 VPN_SUBSCRIPTION_BASE_URL=https://panel-l.andreev-it.ru:2097/sub
 ```
 
-The bot will show users a personal subscription link based on their `subId`.
+The bot will show users a personal subscription link based on their `subId`. If `VPN_PROFILES_JSON`
+contains several profiles, the same subscription link will return several VLESS nodes, and HAPP will
+let the user choose between them.
+
+Example multi-profile setup:
+
+```env
+VPN_PROFILES_JSON=[{"code":"xhttp","title":"ANDREVPN XHTTP","inbound_id":4,"host":"panel-l.andreev-it.ru","port":16347,"transport_type":"xhttp","security":"none","xhttp_path":"/","xhttp_mode":"auto"},{"code":"reality_tcp_1","title":"ANDREVPN Reality 1","inbound_id":5,"host":"panel-l.andreev-it.ru","port":443,"transport_type":"tcp","security":"reality","flow":"xtls-rprx-vision","reality_public_key":"...","reality_short_id":"...","reality_server_name":"www.cloudflare.com","reality_fingerprint":"firefox","reality_spider_x":"/"}]
+```
 
 ## Payments
 

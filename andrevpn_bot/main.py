@@ -13,7 +13,7 @@ from .config import load_config
 from .db import Database
 from .handlers import build_router
 from .reminders import run_subscription_reminders
-from .texts import build_vless_reality_link
+from .texts import build_vless_links
 from .xui import XuiApi
 
 
@@ -56,11 +56,11 @@ async def start_subscription_server(config, db: Database):
         if not user.is_active:
             raise web.HTTPForbidden(text="Subscription expired")
 
-        link = build_vless_reality_link(user, config)
-        if not link:
+        links = build_vless_links(user, config)
+        if not links:
             raise web.HTTPNotFound()
 
-        body = __import__("base64").b64encode((link + "\n").encode()).decode()
+        body = __import__("base64").b64encode(("\n".join(links) + "\n").encode()).decode()
         headers = {
             "Profile-Update-Interval": "12",
             "Subscription-Userinfo": (
