@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from aiogram import F, Router
 from aiogram.filters import CommandStart
-from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
+from aiogram.types import CallbackQuery, FSInputFile, LabeledPrice, Message, PreCheckoutQuery
 
 from .config import Config, Plan
 from .db import Database
 from .keyboards import back_menu, main_menu, plans_menu
 from .texts import cabinet, connection_text, happ_instruction, welcome
 from .xui import XuiApi, XuiError
+
+
+WELCOME_IMAGE_PATH = Path(__file__).resolve().parent.parent / "assets" / "welcome.png"
 
 
 def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
@@ -21,6 +25,8 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         if message.from_user is None:
             return
         db.upsert_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
+        if WELCOME_IMAGE_PATH.exists():
+            await message.answer_photo(FSInputFile(WELCOME_IMAGE_PATH))
         await message.answer(welcome(config), reply_markup=main_menu())
 
     @router.callback_query(F.data == "home")
