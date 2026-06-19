@@ -36,19 +36,19 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
 
     @router.callback_query(F.data == "home")
     async def home(callback: CallbackQuery) -> None:
-        await callback.message.edit_text(welcome(config), reply_markup=main_menu())
+        await _show_section(callback, welcome(config), main_menu())
         await callback.answer()
 
     @router.callback_query(F.data == "cabinet")
     async def cabinet_handler(callback: CallbackQuery) -> None:
         user = _touch_user(callback, db)
-        await callback.message.edit_text(cabinet(user), reply_markup=back_menu())
+        await _show_section(callback, cabinet(user), back_menu())
         await callback.answer()
 
     @router.callback_query(F.data == "happ")
     async def happ_handler(callback: CallbackQuery) -> None:
         _touch_user(callback, db)
-        await callback.message.edit_text(happ_instruction(config), reply_markup=back_menu())
+        await _show_section(callback, happ_instruction(config), back_menu())
         await callback.answer()
 
     @router.callback_query(F.data == "connection")
@@ -63,15 +63,16 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
                 await _notify_admins(callback.message.bot, config, f"3X-UI error for {user.telegram_id}: {exc}")
                 return
 
-        await callback.message.edit_text(connection_text(user, config), reply_markup=back_menu())
+        await _show_section(callback, connection_text(user, config), back_menu())
         await callback.answer()
 
     @router.callback_query(F.data == "plans")
     async def plans_handler(callback: CallbackQuery) -> None:
         _touch_user(callback, db)
-        await callback.message.edit_text(
+        await _show_section(
+            callback,
             "<b>Выберите срок подписки</b>",
-            reply_markup=plans_menu(config.plans, config.payment_currency),
+            plans_menu(config.plans, config.payment_currency),
         )
         await callback.answer()
 
@@ -87,7 +88,7 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
                 "Тариф выбран, но платёжный токен ещё не указан в настройках бота. "
                 "Напишите администратору для ручного продления."
             )
-            await callback.message.edit_text(text, reply_markup=back_menu())
+            await _show_section(callback, text, back_menu())
             await callback.answer()
             await _notify_admins(callback.message.bot, config, f"User {user.telegram_id} wants to pay for {plan.title}")
             return
@@ -153,6 +154,15 @@ def _touch_user(callback: CallbackQuery, db: Database):
     if callback.from_user is None:
         raise RuntimeError("Callback without Telegram user")
     return db.upsert_user(callback.from_user.id, callback.from_user.username, callback.from_user.first_name)
+
+
+async def _show_section(callback: CallbackQuery, text: str, reply_markup) -> None:
+    if callback.message is None:
+        return
+    if callback.message.photo:
+        await callback.message.edit_caption(caption=text, reply_markup=reply_markup)
+        return
+    await callback.message.edit_text(text, reply_markup=reply_markup)
 
 
 def _find_plan(plans: list[Plan], code: str) -> Plan:
