@@ -152,11 +152,11 @@ def build_vless_profile_link(user: User, profile: VpnProfile) -> str:
     params = {"type": profile.transport_type, "encryption": "none"}
     if profile.transport_type == "xhttp":
         params.update({
-            "security": "none",
             "path": profile.xhttp_path,
             "mode": profile.xhttp_mode,
         })
-    elif profile.security == "reality" and profile.reality_public_key:
+
+    if profile.security == "reality" and profile.reality_public_key:
         params.update({
             "security": "reality",
             "pbk": profile.reality_public_key,
