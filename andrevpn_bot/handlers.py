@@ -10,11 +10,25 @@ from aiogram.types import CallbackQuery, FSInputFile, LabeledPrice, Message, Pre
 from .config import Config, Plan
 from .db import Database
 from .keyboards import back_menu, main_menu, plans_menu
-from .texts import cabinet, connection_link_message, connection_text, happ_instruction, welcome
+from .texts import cabinet, connection_link_message, connection_text, welcome
 from .xui import XuiApi, XuiError
 
 
 WELCOME_IMAGE_PATH = Path(__file__).resolve().parent.parent / "assets" / "welcome.png"
+HAPP_STEPS = (
+    (
+        "Установите приложение Happ - Proxy Utility",
+        Path(__file__).resolve().parent.parent / "assets" / "happ_step_1.jpg",
+    ),
+    (
+        'В боте откройте раздел "Получить подключение" и скопируйте персональную ссылку',
+        Path(__file__).resolve().parent.parent / "assets" / "happ_step_2.jpg",
+    ),
+    (
+        'Зайдите в Happ - Proxy Utility и нажмите "Из Буфера" -> Разрешить Вставку',
+        Path(__file__).resolve().parent.parent / "assets" / "happ_step_3.jpg",
+    ),
+)
 
 
 def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
@@ -43,8 +57,9 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
     @router.callback_query(F.data == "happ")
     async def happ_handler(callback: CallbackQuery) -> None:
         _touch_user(callback, db)
-        await _show_section(callback, happ_instruction(config), back_menu())
         await callback.answer()
+        if callback.message:
+            await _send_happ_instruction(callback.message)
 
     @router.callback_query(F.data == "connection")
     async def connection_handler(callback: CallbackQuery) -> None:
@@ -172,6 +187,14 @@ async def _send_home(message: Message, config: Config) -> None:
         )
         return
     await message.answer(welcome(config), reply_markup=main_menu())
+
+
+async def _send_happ_instruction(message: Message) -> None:
+    for caption, image_path in HAPP_STEPS:
+        if image_path.exists():
+            await message.answer_photo(FSInputFile(image_path), caption=caption)
+        else:
+            await message.answer(caption)
 
 
 def _find_plan(plans: list[Plan], code: str) -> Plan:
