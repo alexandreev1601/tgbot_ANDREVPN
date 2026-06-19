@@ -105,6 +105,16 @@ class Database:
             raise LookupError(f"User {telegram_id} does not exist")
         return _user_from_row(row)
 
+    def user_exists(self, telegram_id: int) -> bool:
+        with self.connect() as conn:
+            row = conn.execute("SELECT 1 FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        return row is not None
+
+    def get_or_create_user(self, telegram_id: int) -> User:
+        if self.user_exists(telegram_id):
+            return self.get_user(telegram_id)
+        return self.upsert_user(telegram_id, None, None)
+
     def list_active_users(self) -> list[User]:
         now = _to_iso(datetime.now(UTC))
         with self.connect() as conn:
@@ -118,6 +128,39 @@ class Database:
                 (now,),
             ).fetchall()
         return [_user_from_row(row) for row in rows]
+
+    def stats(self) -> dict[str, int]:
+        now = _to_iso(datetime.now(UTC))
+        month_start = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    COUNT(*) AS total_users,
+                    SUM(CASE WHEN subscription_until IS NOT NULL AND subscription_until > ? THEN 1 ELSE 0 END) AS active_users,
+                    SUM(CASE WHEN subscription_until IS NOT NULL AND subscription_until <= ? THEN 1 ELSE 0 END) AS expired_users,
+                    SUM(CASE WHEN trial_used_at IS NOT NULL THEN 1 ELSE 0 END) AS trial_users
+                FROM users
+                """,
+                (now, now),
+            ).fetchone()
+            payments = conn.execute(
+                """
+                SELECT COUNT(*) AS payments_count, COALESCE(SUM(amount), 0) AS payments_amount
+                FROM payments
+                WHERE created_at >= ?
+                """,
+                (_to_iso(month_start),),
+            ).fetchone()
+
+        return {
+            "total_users": int(row["total_users"] or 0),
+            "active_users": int(row["active_users"] or 0),
+            "expired_users": int(row["expired_users"] or 0),
+            "trial_users": int(row["trial_users"] or 0),
+            "payments_count": int(payments["payments_count"] or 0),
+            "payments_amount": int(payments["payments_amount"] or 0),
+        }
 
     def extend_subscription(self, telegram_id: int, days: int) -> User:
         user = self.get_user(telegram_id)
