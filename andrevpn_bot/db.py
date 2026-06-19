@@ -14,6 +14,7 @@ class User:
     username: str | None
     first_name: str | None
     subscription_until: datetime | None
+    trial_used_at: datetime | None
     xui_email: str | None
     xui_uuid: str | None
     xui_sub_id: str | None
@@ -39,6 +40,7 @@ class Database:
                     first_name TEXT,
                     created_at TEXT NOT NULL,
                     subscription_until TEXT,
+                    trial_used_at TEXT,
                     xui_email TEXT,
                     xui_uuid TEXT,
                     xui_sub_id TEXT,
@@ -67,6 +69,9 @@ class Database:
                 );
                 """
             )
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+            if "trial_used_at" not in columns:
+                conn.execute("ALTER TABLE users ADD COLUMN trial_used_at TEXT")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -125,6 +130,29 @@ class Database:
                 (_to_iso(new_until), telegram_id),
             )
         return self.get_user(telegram_id)
+
+    def activate_trial(self, telegram_id: int, days: int = 3) -> User:
+        user = self.get_user(telegram_id)
+        if user.trial_used_at is not None:
+            raise TrialAlreadyUsedError
+        if user.is_active:
+            raise ActiveSubscriptionError
+
+        now = datetime.now(UTC)
+        new_until = now + timedelta(days=days)
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE users
+                SET subscription_until = ?, trial_used_at = ?
+                WHERE telegram_id = ? AND trial_used_at IS NULL
+                """,
+                (_to_iso(new_until), _to_iso(now), telegram_id),
+            )
+        updated = self.get_user(telegram_id)
+        if updated.trial_used_at is None:
+            raise TrialAlreadyUsedError
+        return updated
 
     def save_xui_client(self, telegram_id: int, email: str, uuid: str, sub_id: str, inbound_id: int) -> User:
         with self.connect() as conn:
@@ -205,6 +233,7 @@ def _user_from_row(row: sqlite3.Row) -> User:
         username=row["username"],
         first_name=row["first_name"],
         subscription_until=_from_iso(row["subscription_until"]),
+        trial_used_at=_from_iso(row["trial_used_at"]),
         xui_email=row["xui_email"],
         xui_uuid=row["xui_uuid"],
         xui_sub_id=row["xui_sub_id"],
@@ -223,3 +252,11 @@ def _from_iso(value: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
+
+
+class TrialAlreadyUsedError(RuntimeError):
+    pass
+
+
+class ActiveSubscriptionError(RuntimeError):
+    pass

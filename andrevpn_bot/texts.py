@@ -82,6 +82,34 @@ def connection_text(user: User, config: Config) -> str:
     return "<b>Подключение ANDREVPN</b>\n\nНастройки подключения ещё не заполнены администратором."
 
 
+def trial_text(user: User) -> str:
+    if user.trial_used_at is not None:
+        return (
+            "<b>Пробная версия ANDREVPN</b>\n\n"
+            "Пробный период уже был активирован ранее. Он доступен только один раз."
+        )
+    if user.is_active:
+        return (
+            "<b>Пробная версия ANDREVPN</b>\n\n"
+            "У вас уже есть активная подписка. Пробный период доступен только новым пользователям без активной подписки."
+        )
+    return (
+        "<b>Пробная версия ANDREVPN</b>\n\n"
+        "Вы можете получить пробный период на <b>3 дня</b>. "
+        "После активации подключение появится в разделе <b>Получить подключение</b>.\n\n"
+        "Пробный период доступен только один раз."
+    )
+
+
+def trial_success_text(user: User) -> str:
+    until = format_dt(user.subscription_until) if user.subscription_until else ""
+    return (
+        "<b>Пробная подписка активирована</b>\n\n"
+        f"Доступ ANDREVPN выдан на 3 дня, до: <b>{until}</b>.\n\n"
+        "Подключение уже находится в разделе <b>Получить подключение</b>."
+    )
+
+
 def connection_link_message(user: User, config: Config) -> str:
     link = connection_link(user, config)
     if not link:

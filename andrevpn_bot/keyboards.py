@@ -10,6 +10,7 @@ def main_menu() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="Личный кабинет", callback_data="cabinet")],
             [InlineKeyboardButton(text="Оплатить / продлить", callback_data="plans")],
+            [InlineKeyboardButton(text="Получить пробную версию", callback_data="trial")],
             [InlineKeyboardButton(text="Инструкция HAPP", callback_data="happ")],
             [InlineKeyboardButton(text="Получить подключение", callback_data="connection")],
         ]
@@ -29,4 +30,13 @@ def plans_menu(plans: list[Plan], currency: str) -> InlineKeyboardMarkup:
 def back_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="Назад", callback_data="home")]]
+    )
+
+
+def trial_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Получить пробный период", callback_data="trial:activate")],
+            [InlineKeyboardButton(text="Назад", callback_data="home")],
+        ]
     )

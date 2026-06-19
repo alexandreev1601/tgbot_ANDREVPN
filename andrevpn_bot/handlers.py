@@ -8,9 +8,9 @@ from aiogram.filters import CommandStart
 from aiogram.types import CallbackQuery, FSInputFile, LabeledPrice, Message, PreCheckoutQuery
 
 from .config import Config, Plan
-from .db import Database
-from .keyboards import back_menu, main_menu, plans_menu
-from .texts import cabinet, connection_link_message, connection_text, welcome
+from .db import ActiveSubscriptionError, Database, TrialAlreadyUsedError
+from .keyboards import back_menu, main_menu, plans_menu, trial_menu
+from .texts import cabinet, connection_link_message, connection_text, trial_success_text, trial_text, welcome
 from .xui import XuiApi, XuiError
 
 
@@ -60,6 +60,38 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         await callback.answer()
         if callback.message:
             await _send_happ_instruction(callback.message)
+
+    @router.callback_query(F.data == "trial")
+    async def trial_handler(callback: CallbackQuery) -> None:
+        user = _touch_user(callback, db)
+        keyboard = trial_menu() if user.trial_used_at is None and not user.is_active else back_menu()
+        await _show_section(callback, trial_text(user), keyboard)
+        await callback.answer()
+
+    @router.callback_query(F.data == "trial:activate")
+    async def trial_activate_handler(callback: CallbackQuery) -> None:
+        user = _touch_user(callback, db)
+        try:
+            updated_user = db.activate_trial(user.telegram_id, days=3)
+        except TrialAlreadyUsedError:
+            await _show_section(callback, trial_text(db.get_user(user.telegram_id)), back_menu())
+            await callback.answer("Пробный период уже был использован.", show_alert=True)
+            return
+        except ActiveSubscriptionError:
+            await _show_section(callback, trial_text(db.get_user(user.telegram_id)), back_menu())
+            await callback.answer("У вас уже есть активная подписка.", show_alert=True)
+            return
+
+        try:
+            await xui.provision_user(db, updated_user)
+            updated_user = db.get_user(user.telegram_id)
+        except XuiError as exc:
+            await callback.answer("Пробная подписка активирована, но подключение создаётся вручную.", show_alert=True)
+            await _notify_admins(callback.message.bot, config, f"Trial user {user.telegram_id}, but 3X-UI failed: {exc}")
+            return
+
+        await _show_section(callback, trial_success_text(updated_user), back_menu())
+        await callback.answer("Пробная подписка активирована.")
 
     @router.callback_query(F.data == "connection")
     async def connection_handler(callback: CallbackQuery) -> None:
