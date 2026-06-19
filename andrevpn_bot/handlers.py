@@ -10,7 +10,7 @@ from aiogram.types import CallbackQuery, FSInputFile, LabeledPrice, Message, Pre
 from .config import Config, Plan
 from .db import Database
 from .keyboards import back_menu, main_menu, plans_menu
-from .texts import cabinet, connection_text, happ_instruction, welcome
+from .texts import cabinet, connection_link_message, connection_text, happ_instruction, welcome
 from .xui import XuiApi, XuiError
 
 
@@ -63,8 +63,11 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
                 await _notify_admins(callback.message.bot, config, f"3X-UI error for {user.telegram_id}: {exc}")
                 return
 
-        await _show_section(callback, connection_text(user, config), back_menu())
         await callback.answer()
+        await _show_section(callback, connection_text(user, config), back_menu())
+        link_message = connection_link_message(user, config)
+        if link_message and callback.message:
+            await callback.message.answer(link_message)
 
     @router.callback_query(F.data == "plans")
     async def plans_handler(callback: CallbackQuery) -> None:

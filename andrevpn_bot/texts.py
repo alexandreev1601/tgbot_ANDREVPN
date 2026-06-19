@@ -54,12 +54,9 @@ def connection_text(user: User, config: Config) -> str:
         )
 
     if user.xui_sub_id and config.vpn_subscription_base_url:
-        link = f"{config.vpn_subscription_base_url}/{user.xui_sub_id}"
         return (
             "<b>Подключение ANDREVPN</b>\n\n"
-            "Ваша персональная ссылка подписки для HAPP:\n"
-            f"<code>{link}</code>\n\n"
-            "Удалите старый профиль, затем добавьте эту ссылку в HAPP как подписку и обновите её. "
+            "Персональная ссылка для подключения отправлена отдельным сообщением ниже.\n\n"
             "Внутри подписки может быть несколько вариантов подключения."
         )
 
@@ -67,9 +64,7 @@ def connection_text(user: User, config: Config) -> str:
     if direct_link:
         return (
             "<b>Подключение ANDREVPN</b>\n\n"
-            "Ваша персональная ссылка для HAPP:\n"
-            f"<code>{direct_link}</code>\n\n"
-            "Скопируйте её и импортируйте в HAPP как профиль."
+            "Персональная ссылка для подключения отправлена отдельным сообщением ниже."
         )
 
     if not user.xui_sub_id:
@@ -81,6 +76,26 @@ def connection_text(user: User, config: Config) -> str:
         )
 
     return "<b>Подключение ANDREVPN</b>\n\nНастройки подключения ещё не заполнены администратором."
+
+
+def connection_link_message(user: User, config: Config) -> str:
+    link = connection_link(user, config)
+    if not link:
+        return ""
+
+    return (
+        f"<code>{link}</code>\n\n"
+        "Скопируйте данную ссылку, зайдите в приложение Happ - Proxy Utility "
+        "и выберите внизу слева \"Из буфера\"."
+    )
+
+
+def connection_link(user: User, config: Config) -> str:
+    if not user.is_active:
+        return ""
+    if user.xui_sub_id and config.vpn_subscription_base_url:
+        return f"{config.vpn_subscription_base_url}/{user.xui_sub_id}"
+    return build_vless_reality_link(user, config)
 
 
 def build_vless_reality_link(user: User, config: Config) -> str:
