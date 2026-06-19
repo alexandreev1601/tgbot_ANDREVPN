@@ -26,7 +26,12 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
             return
         db.upsert_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
         if WELCOME_IMAGE_PATH.exists():
-            await message.answer_photo(FSInputFile(WELCOME_IMAGE_PATH))
+            await message.answer_photo(
+                FSInputFile(WELCOME_IMAGE_PATH),
+                caption=welcome(config),
+                reply_markup=main_menu(),
+            )
+            return
         await message.answer(welcome(config), reply_markup=main_menu())
 
     @router.callback_query(F.data == "home")
