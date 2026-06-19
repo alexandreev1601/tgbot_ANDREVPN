@@ -57,14 +57,18 @@ def connection_text(user: User, config: Config) -> str:
         return (
             "<b>Подключение ANDREVPN</b>\n\n"
             "Персональная ссылка для подключения отправлена отдельным сообщением ниже.\n\n"
-            "Внутри подписки может быть несколько вариантов подключения."
+            "Внутри подписки может быть несколько вариантов подключения.\n\n"
+            "Скопируйте данную ссылку, зайдите в приложение Happ - Proxy Utility "
+            "и выберите внизу слева \"Из буфера\"."
         )
 
     direct_link = build_vless_reality_link(user, config)
     if direct_link:
         return (
             "<b>Подключение ANDREVPN</b>\n\n"
-            "Персональная ссылка для подключения отправлена отдельным сообщением ниже."
+            "Персональная ссылка для подключения отправлена отдельным сообщением ниже.\n\n"
+            "Скопируйте данную ссылку, зайдите в приложение Happ - Proxy Utility "
+            "и выберите внизу слева \"Из буфера\"."
         )
 
     if not user.xui_sub_id:
@@ -83,11 +87,7 @@ def connection_link_message(user: User, config: Config) -> str:
     if not link:
         return ""
 
-    return (
-        f"<code>{link}</code>\n\n"
-        "Скопируйте данную ссылку, зайдите в приложение Happ - Proxy Utility "
-        "и выберите внизу слева \"Из буфера\"."
-    )
+    return f"<code>{link}</code>"
 
 
 def connection_link(user: User, config: Config) -> str:
