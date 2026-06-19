@@ -18,7 +18,7 @@ WELCOME_IMAGE_PATH = Path(__file__).resolve().parent.parent / "assets" / "welcom
 HAPP_STEPS = (
     (
         "Установите приложение Happ - Proxy Utility",
-        Path(__file__).resolve().parent.parent / "assets" / "happ_step_1.jpg",
+        Path(__file__).resolve().parent.parent / "assets" / "happ_step_3.jpg",
     ),
     (
         'В боте откройте раздел "Получить подключение" и скопируйте персональную ссылку',
@@ -26,7 +26,7 @@ HAPP_STEPS = (
     ),
     (
         'Зайдите в Happ - Proxy Utility и нажмите "Из Буфера" -> Разрешить Вставку',
-        Path(__file__).resolve().parent.parent / "assets" / "happ_step_3.jpg",
+        Path(__file__).resolve().parent.parent / "assets" / "happ_step_1.jpg",
     ),
 )
 
