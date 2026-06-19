@@ -25,19 +25,14 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         if message.from_user is None:
             return
         db.upsert_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
-        if WELCOME_IMAGE_PATH.exists():
-            await message.answer_photo(
-                FSInputFile(WELCOME_IMAGE_PATH),
-                caption=welcome(config),
-                reply_markup=main_menu(),
-            )
-            return
-        await message.answer(welcome(config), reply_markup=main_menu())
+        await _send_home(message, config)
 
     @router.callback_query(F.data == "home")
     async def home(callback: CallbackQuery) -> None:
-        await _show_section(callback, welcome(config), main_menu())
         await callback.answer()
+        if callback.message:
+            await callback.message.edit_reply_markup(reply_markup=None)
+            await _send_home(callback.message, config)
 
     @router.callback_query(F.data == "cabinet")
     async def cabinet_handler(callback: CallbackQuery) -> None:
@@ -166,6 +161,17 @@ async def _show_section(callback: CallbackQuery, text: str, reply_markup) -> Non
         await callback.message.edit_caption(caption=text, reply_markup=reply_markup)
         return
     await callback.message.edit_text(text, reply_markup=reply_markup)
+
+
+async def _send_home(message: Message, config: Config) -> None:
+    if WELCOME_IMAGE_PATH.exists():
+        await message.answer_photo(
+            FSInputFile(WELCOME_IMAGE_PATH),
+            caption=welcome(config),
+            reply_markup=main_menu(),
+        )
+        return
+    await message.answer(welcome(config), reply_markup=main_menu())
 
 
 def _find_plan(plans: list[Plan], code: str) -> Plan:
