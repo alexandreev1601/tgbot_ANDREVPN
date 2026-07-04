@@ -16,6 +16,7 @@ from .keyboards import (
     admin_back_menu,
     admin_menu,
     back_menu,
+    card_payment_back_menu,
     card_plans_menu,
     instruction_done_menu,
     instructions_android_menu,
@@ -345,7 +346,7 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         await _show_section(
             callback,
             "<b>TG звездами (автоматически)</b>\n\nВыберите срок подписки.",
-            plans_menu(config.plans, config.payment_currency),
+            plans_menu(config.plans, config.payment_currency, back_callback="plans"),
         )
         await callback.answer()
 
@@ -368,7 +369,7 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
             return
 
         period, amount = CARD_PAYMENT_PLANS[code]
-        await _show_section(callback, _card_payment_text(user.telegram_id, period, amount), back_menu())
+        await _show_section(callback, _card_payment_text(user.telegram_id, period, amount), card_payment_back_menu())
         await callback.answer()
 
     @router.callback_query(F.data.startswith("pay:"))

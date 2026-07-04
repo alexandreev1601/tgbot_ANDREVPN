@@ -19,13 +19,13 @@ def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def plans_menu(plans: list[Plan], currency: str) -> InlineKeyboardMarkup:
+def plans_menu(plans: list[Plan], currency: str, back_callback: str = "home") -> InlineKeyboardMarkup:
     currency_label = "XTR" if currency.upper() == "XTR" else "₽"
     rows = [
         [InlineKeyboardButton(text=f"{plan.title} - {plan.price} {currency_label}", callback_data=f"pay:{plan.code}")]
         for plan in plans
     ]
-    rows.append([InlineKeyboardButton(text="Назад", callback_data="home")])
+    rows.append([InlineKeyboardButton(text="Назад", callback_data=back_callback)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -33,7 +33,7 @@ def payment_method_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="TG звездами (автоматически)", callback_data="plans:stars")],
-            [InlineKeyboardButton(text="Перевод на карту (написать админу)", callback_data="plans:card")],
+            [InlineKeyboardButton(text="Перевод на карту (через менеджера)", callback_data="plans:card")],
             [InlineKeyboardButton(text="Назад", callback_data="home")],
         ]
     )
@@ -46,6 +46,15 @@ def card_plans_menu() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="2 месяца (250 рублей)", callback_data="cardpay:2")],
             [InlineKeyboardButton(text="3 месяца (350 рублей)", callback_data="cardpay:3")],
             [InlineKeyboardButton(text="Назад", callback_data="plans")],
+        ]
+    )
+
+
+def card_payment_back_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Назад", callback_data="plans:card")],
+            [InlineKeyboardButton(text="Главное меню", callback_data="home")],
         ]
     )
 
