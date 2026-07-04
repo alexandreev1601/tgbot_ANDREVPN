@@ -175,7 +175,7 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         _touch_user(callback, db)
         await _show_section(
             callback,
-            "<b>Что делать если в App Store</b>\n\nИнструкция будет добавлена позже.",
+            "<b>Что делать если в App Store нет HAPP</b>\n\nИнструкция будет добавлена позже.",
             instructions_ios_menu(),
         )
         await callback.answer()

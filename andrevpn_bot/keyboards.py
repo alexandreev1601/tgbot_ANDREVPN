@@ -57,7 +57,7 @@ def instructions_ios_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Как подключить подписку к HAPP", callback_data="instructions:ios:happ")],
-            [InlineKeyboardButton(text="Что делать если в App Store", callback_data="instructions:ios:appstore")],
+            [InlineKeyboardButton(text="Что делать если в App Store нет HAPP", callback_data="instructions:ios:appstore")],
             [InlineKeyboardButton(text="Назад", callback_data="instructions")],
         ]
     )
