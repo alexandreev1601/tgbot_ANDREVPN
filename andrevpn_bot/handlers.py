@@ -29,6 +29,8 @@ from .keyboards import (
     support_menu,
     trial_menu,
 )
+from .payments import PaidSubscriptionService
+from .referrals import ReferralGrant, ReferralService
 from .texts import cabinet, connection_link_message, connection_text, format_dt, trial_success_text, trial_text, welcome
 from .xui import XuiApi, XuiError
 
@@ -97,7 +99,10 @@ APPSTORE_STEPS = (
 
 def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
     router = Router()
+    referrals = ReferralService(db)
+    paid_subscriptions = PaidSubscriptionService(db, referrals)
     admin_add_waiting: set[int] = set()
+    admin_manual_payment_waiting: set[int] = set()
     support_waiting: set[int] = set()
 
     @router.message(CommandStart())
@@ -105,7 +110,9 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         if message.from_user is None:
             return
         is_new_user = not db.user_exists(message.from_user.id)
-        db.upsert_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
+        user = db.upsert_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
+        user = referrals.ensure_referral_code(user)
+        referrals.bind_from_start_argument(user, _start_argument(message.text), is_new_user=is_new_user)
         if is_new_user:
             await _notify_admins(
                 message.bot,
@@ -123,6 +130,7 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
     async def home(callback: CallbackQuery) -> None:
         await callback.answer()
         admin_add_waiting.discard(callback.from_user.id)
+        admin_manual_payment_waiting.discard(callback.from_user.id)
         support_waiting.discard(callback.from_user.id)
         if callback.message:
             await callback.message.edit_reply_markup(reply_markup=None)
@@ -134,10 +142,32 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
             await callback.answer("Нет доступа.", show_alert=True)
             return
         admin_add_waiting.discard(callback.from_user.id)
+        admin_manual_payment_waiting.discard(callback.from_user.id)
         await _show_section(
             callback,
             "<b>Админ панель ANDREVPN</b>\n\nВыберите нужный раздел.",
             admin_menu(),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:manual_payment")
+    async def admin_manual_payment_handler(callback: CallbackQuery) -> None:
+        if not _is_admin(callback.from_user.id, config):
+            await callback.answer("Нет доступа.", show_alert=True)
+            return
+        admin_add_waiting.discard(callback.from_user.id)
+        admin_manual_payment_waiting.add(callback.from_user.id)
+        await _show_section(
+            callback,
+            (
+                "<b>Подтвердить ручную оплату</b>\n\n"
+                "Отправьте ID пользователя и оплаченный срок.\n\n"
+                "Пример:\n<code>443060337 1</code>\n\n"
+                "Где срок: 1, 2 или 3 месяца.\n"
+                "Бот создаст запись оплаты, продлит подписку, добавит клиента во все VPN-профили "
+                "и начислит реферальный бонус, если пользователь пришёл по ссылке."
+            ),
+            admin_back_menu(),
         )
         await callback.answer()
 
@@ -179,6 +209,17 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
     async def cabinet_handler(callback: CallbackQuery) -> None:
         user = _touch_user(callback, db)
         await _show_section(callback, cabinet(user), back_menu())
+        await callback.answer()
+
+    @router.callback_query(F.data == "referrals")
+    async def referrals_handler(callback: CallbackQuery) -> None:
+        user = referrals.ensure_referral_code(_touch_user(callback, db))
+        bot_info = await callback.bot.get_me()
+        if not bot_info.username:
+            await callback.answer("Не удалось получить имя бота.", show_alert=True)
+            return
+        link = referrals.referral_link(user, bot_info.username)
+        await _show_section(callback, _referral_program_text(user, link, referrals.stats(user)), back_menu())
         await callback.answer()
 
     @router.callback_query(F.data == "support")
@@ -306,6 +347,9 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
 
         await _show_section(callback, trial_success_text(updated_user), back_menu())
         await callback.answer("Пробная подписка активирована.")
+        referral_grant = referrals.grant_trial_reward(updated_user)
+        if referral_grant:
+            await _notify_referral_grant(callback.message.bot, referral_grant, "trial")
         await _notify_admins(
             callback.message.bot,
             config,
@@ -416,16 +460,17 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         plan_code = payload.split(":", 1)[1] if payload.startswith("plan:") else ""
         plan = _find_plan(config.plans, plan_code)
 
-        updated_user = db.extend_subscription(user.telegram_id, plan.days)
-        db.add_payment(
-            telegram_id=user.telegram_id,
-            plan_code=plan.code,
+        result = paid_subscriptions.confirm_payment_and_extend_subscription(
+            user=user,
+            plan=plan,
             amount=message.successful_payment.total_amount,
             currency=message.successful_payment.currency,
+            provider="telegram_stars" if message.successful_payment.currency.upper() == "XTR" else "telegram_payment",
             provider_payment_charge_id=message.successful_payment.provider_payment_charge_id,
             telegram_payment_charge_id=message.successful_payment.telegram_payment_charge_id,
             raw_payload=json.dumps(message.successful_payment.model_dump(mode="json"), ensure_ascii=False),
         )
+        updated_user = result.user
 
         try:
             await xui.provision_user(db, updated_user)
@@ -437,6 +482,9 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
                 reply_markup=main_menu(_is_admin(user.telegram_id, config)),
             )
             return
+
+        if result.referral_grant:
+            await _notify_referral_grant(message.bot, result.referral_grant, "payment")
 
         await message.answer(
             "Оплата прошла успешно. Подписка ANDREVPN продлена.\n\n" + cabinet(updated_user),
@@ -458,6 +506,7 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         lambda message: message.from_user is not None
         and message.from_user.id in support_waiting
         and message.from_user.id not in admin_add_waiting
+        and message.from_user.id not in admin_manual_payment_waiting
     )
     async def support_message_handler(message: Message) -> None:
         if message.from_user is None:
@@ -479,6 +528,16 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         if message.from_user is None or not _is_admin(message.from_user.id, config):
             return
         if message.from_user.id not in admin_add_waiting:
+            if message.from_user.id not in admin_manual_payment_waiting:
+                return
+            await _handle_admin_manual_payment(
+                message,
+                config,
+                db,
+                xui,
+                paid_subscriptions,
+                admin_manual_payment_waiting,
+            )
             return
 
         try:
@@ -530,6 +589,118 @@ def _touch_user(callback: CallbackQuery, db: Database):
     if callback.from_user is None:
         raise RuntimeError("Callback without Telegram user")
     return db.upsert_user(callback.from_user.id, callback.from_user.username, callback.from_user.first_name)
+
+
+def _start_argument(text: str | None) -> str | None:
+    if not text:
+        return None
+    parts = text.split(maxsplit=1)
+    return parts[1].strip() if len(parts) == 2 else None
+
+
+def _referral_program_text(user, referral_link: str, stats: dict[str, int]) -> str:
+    referrer = f"<code>{user.referred_by}</code>" if user.referred_by else "нет"
+    return (
+        "<b>Реферальная программа</b>\n\n"
+        "Приглашайте друзей и получайте бонусные дни к VPN:\n\n"
+        "Друг запустил пробный период - <b>+3 дня</b>\n"
+        "Друг купил 1 месяц - <b>+7 дней</b>\n"
+        "Друг купил 2 месяца - <b>+14 дней</b>\n"
+        "Друг купил 3 месяца - <b>+21 день</b>\n\n"
+        "Ваша ссылка:\n"
+        f"<code>{referral_link}</code>\n\n"
+        f"Приглашено пользователей: <b>{stats['invited_users']}</b>\n"
+        f"Начислено бонусных дней: <b>{stats['reward_days']}</b>\n"
+        f"Бонусов за пробный период: <b>{stats['trial_rewards']}</b>\n"
+        f"Бонусов за оплаты: <b>{stats['payment_rewards']}</b>\n\n"
+        f"Вас пригласил: {referrer}"
+    )
+
+
+async def _handle_admin_manual_payment(
+    message: Message,
+    config: Config,
+    db: Database,
+    xui: XuiApi,
+    paid_subscriptions: PaidSubscriptionService,
+    admin_manual_payment_waiting: set[int],
+) -> None:
+    try:
+        telegram_id, months = _parse_admin_manual_payment_request(message.text or "")
+        plan = _find_plan_by_months(config.plans, months)
+        amount = _manual_payment_amount(months)
+    except ValueError:
+        await message.answer(
+            "Не понял формат. Отправьте так:\n<code>443060337 1</code>\n\nСрок может быть 1, 2 или 3 месяца.",
+            reply_markup=admin_back_menu(),
+        )
+        return
+
+    user = db.get_or_create_user(telegram_id)
+    result = paid_subscriptions.confirm_payment_and_extend_subscription(
+        user=user,
+        plan=plan,
+        amount=amount,
+        currency="RUB",
+        provider="manual_transfer",
+        external_payment_id=f"manual:{message.from_user.id}:{message.chat.id}:{message.message_id}",
+        confirmed_by=message.from_user.id,
+        admin_comment=f"Manual transfer confirmed by {message.from_user.id}",
+        raw_payload=json.dumps(
+            {
+                "telegram_id": telegram_id,
+                "months": months,
+                "amount": amount,
+                "admin_id": message.from_user.id,
+                "message_id": message.message_id,
+            },
+            ensure_ascii=False,
+        ),
+    )
+    updated_user = result.user
+
+    try:
+        await xui.provision_user(db, updated_user)
+        updated_user = db.get_user(user.telegram_id)
+    except XuiError as exc:
+        admin_manual_payment_waiting.discard(message.from_user.id)
+        await message.answer(
+            f"Оплата подтверждена, но подключение в 3X-UI не создалось:\n<code>{exc}</code>",
+            reply_markup=admin_back_menu(),
+        )
+        return
+
+    admin_manual_payment_waiting.discard(message.from_user.id)
+    referral_note = (
+        f"Реферальный бонус начислен: +{result.referral_grant.reward.reward_days} дней."
+        if result.referral_grant else
+        "У пользователя нет referrer или бонус по этой оплате уже начислялся."
+    )
+    await message.answer(
+        (
+            "<b>Ручная оплата подтверждена</b>\n\n"
+            f"ID: <code>{updated_user.telegram_id}</code>\n"
+            f"Тариф: {plan.title}\n"
+            f"Сумма: {amount} RUB\n"
+            f"Активна до: <b>{format_dt(updated_user.subscription_until)}</b>\n\n"
+            f"{referral_note}"
+        ),
+        reply_markup=admin_back_menu(),
+    )
+    await _notify_user_about_admin_subscription(message.bot, updated_user, plan.days)
+    if result.referral_grant:
+        await _notify_referral_grant(message.bot, result.referral_grant, "payment")
+    await _notify_admins(
+        message.bot,
+        config,
+        (
+            "<b>Ручная оплата</b>\n"
+            f"ID: <code>{updated_user.telegram_id}</code>\n"
+            f"Тариф: {plan.title}\n"
+            f"Сумма: {amount} RUB\n"
+            f"Активна до: <b>{format_dt(updated_user.subscription_until)}</b>"
+        ),
+    )
 
 
 async def _show_section(callback: CallbackQuery, text: str, reply_markup) -> None:
@@ -586,6 +757,18 @@ def _find_plan(plans: list[Plan], code: str) -> Plan:
     raise RuntimeError(f"Unknown plan: {code}")
 
 
+def _find_plan_by_months(plans: list[Plan], months: int) -> Plan:
+    days_by_months = {1: 30, 2: 60, 3: 90}
+    target_days = days_by_months.get(months)
+    if target_days is None:
+        raise ValueError("Invalid months")
+
+    for plan in plans:
+        if plan.days == target_days:
+            return plan
+    raise ValueError("Plan not configured")
+
+
 def _telegram_amount(plan: Plan, currency: str) -> int:
     zero_decimal = {"XTR", "JPY", "KRW"}
     return plan.price if currency.upper() in zero_decimal else plan.price * 100
@@ -620,7 +803,9 @@ def _admin_stats_text(db: Database, config: Config) -> str:
         f"Пробных пользователей: <b>{stats['trial_users']}</b>\n"
         f"Просроченных подписок: <b>{stats['expired_users']}</b>\n\n"
         f"Оплат в этом месяце: <b>{stats['payments_count']}</b>\n"
-        f"Сумма за месяц: <b>{stats['payments_amount']} {currency}</b>"
+        f"Сумма за месяц: <b>{stats['payments_amount']} {currency}</b>\n\n"
+        f"Реферальных бонусов: <b>{stats['referral_rewards_count']}</b>\n"
+        f"Начислено бонусных дней: <b>{stats['referral_reward_days']}</b>"
     )
 
 
@@ -633,6 +818,21 @@ def _parse_admin_add_request(text: str) -> tuple[int, int]:
     if telegram_id <= 0 or days <= 0 or days > 3660:
         raise ValueError("Invalid telegram_id or days")
     return telegram_id, days
+
+
+def _parse_admin_manual_payment_request(text: str) -> tuple[int, int]:
+    parts = text.replace(",", " ").split()
+    if len(parts) != 2:
+        raise ValueError("Expected telegram_id and months")
+    telegram_id = int(parts[0])
+    months = int(parts[1])
+    if telegram_id <= 0 or months not in {1, 2, 3}:
+        raise ValueError("Invalid telegram_id or months")
+    return telegram_id, months
+
+
+def _manual_payment_amount(months: int) -> int:
+    return CARD_PAYMENT_PLANS[str(months)][1]
 
 
 def _server_status_text() -> str:
@@ -728,6 +928,23 @@ async def _notify_user_about_admin_subscription(bot, user, days: int) -> None:
             ),
             reply_markup=main_menu(False),
         )
+    except Exception:
+        pass
+
+
+async def _notify_referral_grant(bot, grant: ReferralGrant, event_type: str) -> None:
+    if event_type == "trial":
+        text = (
+            "<b>По твоей ссылке новый пользователь запустил пробный период!</b>\n\n"
+            f"Мы начислили тебе +{grant.reward.reward_days} дня VPN."
+        )
+    else:
+        text = (
+            "<b>Твой приглашённый друг оплатил VPN!</b>\n\n"
+            f"Мы начислили тебе +{grant.reward.reward_days} дней к подписке."
+        )
+    try:
+        await bot.send_message(grant.referrer.telegram_id, text)
     except Exception:
         pass
 

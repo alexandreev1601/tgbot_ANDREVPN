@@ -12,6 +12,7 @@ def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Получить пробную версию", callback_data="trial")],
         [InlineKeyboardButton(text="Инструкция по подключению", callback_data="instructions")],
         [InlineKeyboardButton(text="Получить подключение", callback_data="connection")],
+        [InlineKeyboardButton(text="Реферальная программа", callback_data="referrals")],
         [InlineKeyboardButton(text="Вопросы и Поддержка", callback_data="support")],
     ]
     if is_admin:
@@ -134,6 +135,7 @@ def admin_menu() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="Статистика", callback_data="admin:stats")],
             [InlineKeyboardButton(text="Добавить подписку по ID", callback_data="admin:add")],
+            [InlineKeyboardButton(text="Подтвердить ручную оплату", callback_data="admin:manual_payment")],
             [InlineKeyboardButton(text="Сервер", callback_data="admin:server")],
             [InlineKeyboardButton(text="Назад", callback_data="home")],
         ]
