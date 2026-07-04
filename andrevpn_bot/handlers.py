@@ -16,12 +16,14 @@ from .keyboards import (
     admin_back_menu,
     admin_menu,
     back_menu,
+    card_plans_menu,
     instruction_done_menu,
     instructions_android_menu,
     instructions_back_menu,
     instructions_ios_menu,
     instructions_os_menu,
     main_menu,
+    payment_method_menu,
     plans_menu,
     support_menu,
     trial_menu,
@@ -31,6 +33,11 @@ from .xui import XuiApi, XuiError
 
 
 WELCOME_IMAGE_PATH = Path(__file__).resolve().parent.parent / "assets" / "welcome.png"
+CARD_PAYMENT_PLANS = {
+    "1": ("1 месяц", 150),
+    "2": ("2 месяца", 250),
+    "3": ("3 месяца", 350),
+}
 HAPP_STEPS = (
     (
         "Установите приложение Happ - Proxy Utility",
@@ -327,9 +334,41 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         _touch_user(callback, db)
         await _show_section(
             callback,
-            "<b>Выберите срок подписки</b>",
+            "<b>Оплатить / продлить</b>\n\nВыберите способ оплаты.",
+            payment_method_menu(),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "plans:stars")
+    async def stars_plans_handler(callback: CallbackQuery) -> None:
+        _touch_user(callback, db)
+        await _show_section(
+            callback,
+            "<b>TG звездами (автоматически)</b>\n\nВыберите срок подписки.",
             plans_menu(config.plans, config.payment_currency),
         )
+        await callback.answer()
+
+    @router.callback_query(F.data == "plans:card")
+    async def card_plans_handler(callback: CallbackQuery) -> None:
+        _touch_user(callback, db)
+        await _show_section(
+            callback,
+            "<b>Перевод на карту</b>\n\nВыберите срок подписки.",
+            card_plans_menu(),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("cardpay:"))
+    async def card_pay_handler(callback: CallbackQuery) -> None:
+        user = _touch_user(callback, db)
+        code = callback.data.split(":", 1)[1]
+        if code not in CARD_PAYMENT_PLANS:
+            await callback.answer("Неизвестный тариф.", show_alert=True)
+            return
+
+        period, amount = CARD_PAYMENT_PLANS[code]
+        await _show_section(callback, _card_payment_text(user.telegram_id, period, amount), back_menu())
         await callback.answer()
 
     @router.callback_query(F.data.startswith("pay:"))
@@ -549,6 +588,21 @@ def _find_plan(plans: list[Plan], code: str) -> Plan:
 def _telegram_amount(plan: Plan, currency: str) -> int:
     zero_decimal = {"XTR", "JPY", "KRW"}
     return plan.price if currency.upper() in zero_decimal else plan.price * 100
+
+
+def _card_payment_text(telegram_id: int, period: str, amount: int) -> str:
+    return (
+        f"<b>Перевод на карту: {period}</b>\n\n"
+        "Для оформления или продления подписки через перевод выполните следующие шаги:\n\n"
+        f"1. Переведите {amount} рублей на карту: <code>2202 2084 9816 2859</code>\n"
+        "2. Сделайте скриншот подтверждения перевода.\n"
+        "3. Отправьте скриншот нашему менеджеру: @zakidoki\n"
+        "4. Вместе со скриншотом обязательно укажите ваш ID.\n"
+        "Его можно найти в личном кабинете этого бота.\n\n"
+        f"Ваш ID: <code>{telegram_id}</code>\n\n"
+        "После проверки платежа менеджер ответит вам и подтвердит оформление или продление подписки. "
+        "Обычно это занимает до 5 минут, но в редких случаях ожидание может составлять до 30 минут."
+    )
 
 
 def _is_admin(user_id: int | None, config: Config) -> bool:
