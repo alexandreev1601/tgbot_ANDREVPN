@@ -16,6 +16,7 @@ from .keyboards import (
     admin_back_menu,
     admin_menu,
     back_menu,
+    instruction_done_menu,
     instructions_back_menu,
     instructions_ios_menu,
     instructions_os_menu,
@@ -435,19 +436,21 @@ async def _send_home(message: Message, config: Config, user_id: int | None = Non
 
 
 async def _send_happ_instruction(message: Message) -> None:
-    for caption, image_path in HAPP_STEPS:
+    for index, (caption, image_path) in enumerate(HAPP_STEPS):
+        reply_markup = instruction_done_menu() if index == len(HAPP_STEPS) - 1 else None
         if image_path.exists():
-            await message.answer_photo(FSInputFile(image_path), caption=caption)
+            await message.answer_photo(FSInputFile(image_path), caption=caption, reply_markup=reply_markup)
         else:
-            await message.answer(caption)
+            await message.answer(caption, reply_markup=reply_markup)
 
 
 async def _send_appstore_instruction(message: Message) -> None:
-    for caption, image_path in APPSTORE_STEPS:
+    for index, (caption, image_path) in enumerate(APPSTORE_STEPS):
+        reply_markup = instruction_done_menu() if index == len(APPSTORE_STEPS) - 1 else None
         if image_path and image_path.exists():
-            await message.answer_photo(FSInputFile(image_path), caption=caption)
+            await message.answer_photo(FSInputFile(image_path), caption=caption, reply_markup=reply_markup)
         else:
-            await message.answer(caption)
+            await message.answer(caption, reply_markup=reply_markup)
 
 
 def _find_plan(plans: list[Plan], code: str) -> Plan:

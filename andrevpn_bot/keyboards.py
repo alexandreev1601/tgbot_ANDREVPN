@@ -72,6 +72,14 @@ def instructions_back_menu() -> InlineKeyboardMarkup:
     )
 
 
+def instruction_done_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Главное меню", callback_data="home")],
+        ]
+    )
+
+
 def admin_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
