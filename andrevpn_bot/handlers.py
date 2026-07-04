@@ -63,6 +63,10 @@ APPSTORE_STEPS = (
         "Либо можно сгенерировать свои данные и ввести их.",
         Path(__file__).resolve().parent.parent / "assets" / "appstore_step_4.jpg",
     ),
+    (
+        "5. Готово! Сейчас перейдите в поиск приложений и у вас появится приложение HAPP, v2RayTun, AI приложения.",
+        None,
+    ),
 )
 
 
@@ -440,7 +444,7 @@ async def _send_happ_instruction(message: Message) -> None:
 
 async def _send_appstore_instruction(message: Message) -> None:
     for caption, image_path in APPSTORE_STEPS:
-        if image_path.exists():
+        if image_path and image_path.exists():
             await message.answer_photo(FSInputFile(image_path), caption=caption)
         else:
             await message.answer(caption)
