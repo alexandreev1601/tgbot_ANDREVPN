@@ -51,6 +51,13 @@ ANDROID_HAPP_STEPS = (
     ),
     *HAPP_STEPS[1:],
 )
+GOOGLEPLAY_HAPP_STEP = (
+    "Google Play может удалить HAPP из Play Market, из-за этого нужно скачать приложение напрямую.\n\n"
+    'Перейдите по ссылке: <a href="https://www.happ.su/main/ru">https://www.happ.su/main/ru</a> '
+    'и выберите под пунктом Android "Download APK". Начнется скачивание установочного файла. '
+    "После скачивания установите его. HAPP должен появиться у вас на телефоне.",
+    Path(__file__).resolve().parent.parent / "assets" / "googleplay_happ_apk.png",
+)
 APPSTORE_STEPS = (
     (
         "1. В данный момент Happ недоступен в Российском App Store. Но в зарубежном он есть. "
@@ -200,10 +207,12 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         _touch_user(callback, db)
         await _show_section(
             callback,
-            "<b>Что делать если в Google Play нет HAPP</b>\n\nИнструкция будет добавлена позже.",
+            "<b>Что делать если в Google Play нет HAPP</b>\n\nИнструкция отправлена сообщением ниже.",
             instructions_android_menu(),
         )
         await callback.answer()
+        if callback.message:
+            await _send_googleplay_instruction(callback.message)
 
     @router.callback_query(F.data == "instructions:ios")
     async def instructions_ios_handler(callback: CallbackQuery) -> None:
@@ -481,6 +490,14 @@ async def _send_appstore_instruction(message: Message) -> None:
             await message.answer_photo(FSInputFile(image_path), caption=caption, reply_markup=reply_markup)
         else:
             await message.answer(caption, reply_markup=reply_markup)
+
+
+async def _send_googleplay_instruction(message: Message) -> None:
+    caption, image_path = GOOGLEPLAY_HAPP_STEP
+    if image_path.exists():
+        await message.answer_photo(FSInputFile(image_path), caption=caption, reply_markup=instruction_done_menu())
+        return
+    await message.answer(caption, reply_markup=instruction_done_menu())
 
 
 def _find_plan(plans: list[Plan], code: str) -> Plan:
