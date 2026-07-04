@@ -23,6 +23,7 @@ from .keyboards import (
     instructions_os_menu,
     main_menu,
     plans_menu,
+    support_menu,
     trial_menu,
 )
 from .texts import cabinet, connection_link_message, connection_text, format_dt, trial_success_text, trial_text, welcome
@@ -89,6 +90,7 @@ APPSTORE_STEPS = (
 def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
     router = Router()
     admin_add_waiting: set[int] = set()
+    support_waiting: set[int] = set()
 
     @router.message(CommandStart())
     async def start(message: Message) -> None:
@@ -113,6 +115,7 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
     async def home(callback: CallbackQuery) -> None:
         await callback.answer()
         admin_add_waiting.discard(callback.from_user.id)
+        support_waiting.discard(callback.from_user.id)
         if callback.message:
             await callback.message.edit_reply_markup(reply_markup=None)
             await _send_home(callback.message, config, callback.from_user.id)
@@ -168,6 +171,22 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
     async def cabinet_handler(callback: CallbackQuery) -> None:
         user = _touch_user(callback, db)
         await _show_section(callback, cabinet(user), back_menu())
+        await callback.answer()
+
+    @router.callback_query(F.data == "support")
+    async def support_handler(callback: CallbackQuery) -> None:
+        user = _touch_user(callback, db)
+        support_waiting.add(user.telegram_id)
+        await _show_section(
+            callback,
+            (
+                "<b>Вопросы и Поддержка</b>\n\n"
+                "Опишите вопрос одним или несколькими сообщениями. "
+                "Можно отправить текст, скриншот или фото ошибки.\n\n"
+                "Ваше обращение будет передано в поддержку."
+            ),
+            support_menu(),
+        )
         await callback.answer()
 
     @router.callback_query(F.data == "instructions")
@@ -393,6 +412,26 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
                 f"Сумма: {message.successful_payment.total_amount} {message.successful_payment.currency}\n"
                 f"Активна до: <b>{format_dt(updated_user.subscription_until)}</b>"
             ),
+        )
+
+    @router.message(
+        lambda message: message.from_user is not None
+        and message.from_user.id in support_waiting
+        and message.from_user.id not in admin_add_waiting
+    )
+    async def support_message_handler(message: Message) -> None:
+        if message.from_user is None:
+            return
+
+        user = db.upsert_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
+        await _notify_support_message(message, config, user)
+        await message.answer(
+            (
+                "Сообщение отправлено в поддержку.\n\n"
+                "Если нужно, отправьте еще один скриншот или дополнительный текст. "
+                "Чтобы выйти, нажмите кнопку ниже."
+            ),
+            reply_markup=support_menu(),
         )
 
     @router.message(F.text)
@@ -636,6 +675,27 @@ async def _notify_user_about_admin_subscription(bot, user, days: int) -> None:
         )
     except Exception:
         pass
+
+
+async def _notify_support_message(message: Message, config: Config, user) -> None:
+    username = f"@{user.username}" if user.username else "нет"
+    name = user.first_name or "нет"
+    header = (
+        "<b>Новый вопрос в поддержку</b>\n\n"
+        f"ID: <code>{user.telegram_id}</code>\n"
+        f"Username: {username}\n"
+        f"Имя: {name}"
+    )
+    for admin_id in config.admin_ids:
+        try:
+            await message.bot.send_message(admin_id, header)
+            await message.bot.copy_message(
+                chat_id=admin_id,
+                from_chat_id=message.chat.id,
+                message_id=message.message_id,
+            )
+        except Exception:
+            pass
 
 
 async def _notify_admins(bot, config: Config, text: str) -> None:

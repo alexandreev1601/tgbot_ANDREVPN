@@ -12,6 +12,7 @@ def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Получить пробную версию", callback_data="trial")],
         [InlineKeyboardButton(text="Инструкция по подключению", callback_data="instructions")],
         [InlineKeyboardButton(text="Получить подключение", callback_data="connection")],
+        [InlineKeyboardButton(text="Вопросы и Поддержка", callback_data="support")],
     ]
     if is_admin:
         rows.append([InlineKeyboardButton(text="Админ панель", callback_data="admin")])
@@ -83,6 +84,14 @@ def instructions_back_menu() -> InlineKeyboardMarkup:
 
 
 def instruction_done_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Главное меню", callback_data="home")],
+        ]
+    )
+
+
+def support_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Главное меню", callback_data="home")],
