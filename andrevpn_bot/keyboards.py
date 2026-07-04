@@ -10,7 +10,7 @@ def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Личный кабинет", callback_data="cabinet")],
         [InlineKeyboardButton(text="Оплатить / продлить", callback_data="plans")],
         [InlineKeyboardButton(text="Получить пробную версию", callback_data="trial")],
-        [InlineKeyboardButton(text="Инструкция HAPP", callback_data="happ")],
+        [InlineKeyboardButton(text="Инструкция по подключению", callback_data="instructions")],
         [InlineKeyboardButton(text="Получить подключение", callback_data="connection")],
     ]
     if is_admin:
@@ -39,6 +39,35 @@ def trial_menu() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="Получить пробный период", callback_data="trial:activate")],
             [InlineKeyboardButton(text="Назад", callback_data="home")],
+        ]
+    )
+
+
+def instructions_os_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Android", callback_data="instructions:android")],
+            [InlineKeyboardButton(text="IOS", callback_data="instructions:ios")],
+            [InlineKeyboardButton(text="Назад", callback_data="home")],
+        ]
+    )
+
+
+def instructions_ios_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Как подключить подписку к HAPP", callback_data="instructions:ios:happ")],
+            [InlineKeyboardButton(text="Что делать если в App Store", callback_data="instructions:ios:appstore")],
+            [InlineKeyboardButton(text="Назад", callback_data="instructions")],
+        ]
+    )
+
+
+def instructions_back_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Назад к выбору ОС", callback_data="instructions")],
+            [InlineKeyboardButton(text="Главная", callback_data="home")],
         ]
     )
 

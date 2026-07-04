@@ -12,7 +12,17 @@ from aiogram.types import CallbackQuery, FSInputFile, LabeledPrice, Message, Pre
 
 from .config import Config, Plan
 from .db import ActiveSubscriptionError, Database, TrialAlreadyUsedError
-from .keyboards import admin_back_menu, admin_menu, back_menu, main_menu, plans_menu, trial_menu
+from .keyboards import (
+    admin_back_menu,
+    admin_menu,
+    back_menu,
+    instructions_back_menu,
+    instructions_ios_menu,
+    instructions_os_menu,
+    main_menu,
+    plans_menu,
+    trial_menu,
+)
 from .texts import cabinet, connection_link_message, connection_text, format_dt, trial_success_text, trial_text, welcome
 from .xui import XuiApi, XuiError
 
@@ -118,12 +128,57 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         await _show_section(callback, cabinet(user), back_menu())
         await callback.answer()
 
-    @router.callback_query(F.data == "happ")
+    @router.callback_query(F.data == "instructions")
+    async def instructions_handler(callback: CallbackQuery) -> None:
+        _touch_user(callback, db)
+        await _show_section(
+            callback,
+            "<b>Инструкция по подключению</b>\n\nВыберите операционную систему.",
+            instructions_os_menu(),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "instructions:android")
+    async def instructions_android_handler(callback: CallbackQuery) -> None:
+        _touch_user(callback, db)
+        await _show_section(
+            callback,
+            "<b>Android</b>\n\nИнструкция для Android будет добавлена позже.",
+            instructions_back_menu(),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "instructions:ios")
+    async def instructions_ios_handler(callback: CallbackQuery) -> None:
+        _touch_user(callback, db)
+        await _show_section(
+            callback,
+            "<b>IOS</b>\n\nВыберите нужный раздел.",
+            instructions_ios_menu(),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "instructions:ios:happ")
     async def happ_handler(callback: CallbackQuery) -> None:
         _touch_user(callback, db)
         await callback.answer()
+        await _show_section(
+            callback,
+            "<b>Как подключить подписку к HAPP</b>\n\nИнструкция отправлена сообщениями ниже.",
+            instructions_ios_menu(),
+        )
         if callback.message:
             await _send_happ_instruction(callback.message)
+
+    @router.callback_query(F.data == "instructions:ios:appstore")
+    async def instructions_ios_appstore_handler(callback: CallbackQuery) -> None:
+        _touch_user(callback, db)
+        await _show_section(
+            callback,
+            "<b>Что делать если в App Store</b>\n\nИнструкция будет добавлена позже.",
+            instructions_ios_menu(),
+        )
+        await callback.answer()
 
     @router.callback_query(F.data == "trial")
     async def trial_handler(callback: CallbackQuery) -> None:
