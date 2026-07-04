@@ -17,6 +17,7 @@ from .keyboards import (
     admin_menu,
     back_menu,
     instruction_done_menu,
+    instructions_android_menu,
     instructions_back_menu,
     instructions_ios_menu,
     instructions_os_menu,
@@ -170,8 +171,30 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         _touch_user(callback, db)
         await _show_section(
             callback,
-            "<b>Android</b>\n\nИнструкция для Android будет добавлена позже.",
-            instructions_back_menu(),
+            "<b>Android</b>\n\nВыберите нужный раздел.",
+            instructions_android_menu(),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "instructions:android:happ")
+    async def instructions_android_happ_handler(callback: CallbackQuery) -> None:
+        _touch_user(callback, db)
+        await callback.answer()
+        await _show_section(
+            callback,
+            "<b>Как подключить подписку к HAPP</b>\n\nИнструкция отправлена сообщениями ниже.",
+            instructions_android_menu(),
+        )
+        if callback.message:
+            await _send_happ_instruction(callback.message)
+
+    @router.callback_query(F.data == "instructions:android:googleplay")
+    async def instructions_android_googleplay_handler(callback: CallbackQuery) -> None:
+        _touch_user(callback, db)
+        await _show_section(
+            callback,
+            "<b>Что делать если в Google Play нет HAPP</b>\n\nИнструкция будет добавлена позже.",
+            instructions_android_menu(),
         )
         await callback.answer()
 

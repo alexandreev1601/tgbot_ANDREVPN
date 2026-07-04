@@ -63,6 +63,16 @@ def instructions_ios_menu() -> InlineKeyboardMarkup:
     )
 
 
+def instructions_android_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Как подключить подписку к HAPP", callback_data="instructions:android:happ")],
+            [InlineKeyboardButton(text="Что делать если в Google Play нет HAPP", callback_data="instructions:android:googleplay")],
+            [InlineKeyboardButton(text="Назад", callback_data="instructions")],
+        ]
+    )
+
+
 def instructions_back_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
