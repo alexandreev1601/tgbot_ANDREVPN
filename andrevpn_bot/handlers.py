@@ -42,6 +42,28 @@ HAPP_STEPS = (
         Path(__file__).resolve().parent.parent / "assets" / "happ_step_1.jpg",
     ),
 )
+APPSTORE_STEPS = (
+    (
+        "1. В данный момент Happ недоступен в Российском App Store. Но в зарубежном он есть. "
+        "Чтобы у вас появились недоступные приложения нужно поменять регион. "
+        "Так же появятся приложения такие как ChatGPT, Google Gemini, Grok и т.д. "
+        "Для этого перейдите в свой аккаунт App Store.",
+        Path(__file__).resolve().parent.parent / "assets" / "appstore_step_1.jpg",
+    ),
+    (
+        "2. Перейдите в управление аккаунтом.",
+        Path(__file__).resolve().parent.parent / "assets" / "appstore_step_2.jpg",
+    ),
+    (
+        '3. Выберите пункт "Страна и регион", найдите и выберите "Соединенные штаты".',
+        Path(__file__).resolve().parent.parent / "assets" / "appstore_step_3.jpg",
+    ),
+    (
+        "4. Введите эти данные. Эти данные сгенерированы и не существующие. "
+        "Либо можно сгенерировать свои данные и ввести их.",
+        Path(__file__).resolve().parent.parent / "assets" / "appstore_step_4.jpg",
+    ),
+)
 
 
 def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
@@ -175,10 +197,12 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         _touch_user(callback, db)
         await _show_section(
             callback,
-            "<b>Что делать если в App Store нет HAPP</b>\n\nИнструкция будет добавлена позже.",
+            "<b>Что делать если в App Store нет HAPP</b>\n\nИнструкция отправлена сообщениями ниже.",
             instructions_ios_menu(),
         )
         await callback.answer()
+        if callback.message:
+            await _send_appstore_instruction(callback.message)
 
     @router.callback_query(F.data == "trial")
     async def trial_handler(callback: CallbackQuery) -> None:
@@ -408,6 +432,14 @@ async def _send_home(message: Message, config: Config, user_id: int | None = Non
 
 async def _send_happ_instruction(message: Message) -> None:
     for caption, image_path in HAPP_STEPS:
+        if image_path.exists():
+            await message.answer_photo(FSInputFile(image_path), caption=caption)
+        else:
+            await message.answer(caption)
+
+
+async def _send_appstore_instruction(message: Message) -> None:
+    for caption, image_path in APPSTORE_STEPS:
         if image_path.exists():
             await message.answer_photo(FSInputFile(image_path), caption=caption)
         else:
