@@ -44,6 +44,13 @@ HAPP_STEPS = (
         Path(__file__).resolve().parent.parent / "assets" / "happ_step_1.jpg",
     ),
 )
+ANDROID_HAPP_STEPS = (
+    (
+        "Установите приложение Happ - Proxy Utility",
+        Path(__file__).resolve().parent.parent / "assets" / "android_happ_step_1.png",
+    ),
+    *HAPP_STEPS[1:],
+)
 APPSTORE_STEPS = (
     (
         "1. В данный момент Happ недоступен в Российском App Store. Но в зарубежном он есть. "
@@ -186,7 +193,7 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
             instructions_android_menu(),
         )
         if callback.message:
-            await _send_happ_instruction(callback.message)
+            await _send_happ_instruction(callback.message, ANDROID_HAPP_STEPS)
 
     @router.callback_query(F.data == "instructions:android:googleplay")
     async def instructions_android_googleplay_handler(callback: CallbackQuery) -> None:
@@ -458,9 +465,9 @@ async def _send_home(message: Message, config: Config, user_id: int | None = Non
     await message.answer(welcome(config), reply_markup=keyboard)
 
 
-async def _send_happ_instruction(message: Message) -> None:
-    for index, (caption, image_path) in enumerate(HAPP_STEPS):
-        reply_markup = instruction_done_menu() if index == len(HAPP_STEPS) - 1 else None
+async def _send_happ_instruction(message: Message, steps=HAPP_STEPS) -> None:
+    for index, (caption, image_path) in enumerate(steps):
+        reply_markup = instruction_done_menu() if index == len(steps) - 1 else None
         if image_path.exists():
             await message.answer_photo(FSInputFile(image_path), caption=caption, reply_markup=reply_markup)
         else:
