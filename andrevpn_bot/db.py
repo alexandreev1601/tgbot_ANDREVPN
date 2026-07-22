@@ -171,6 +171,15 @@ class Database:
                     raw_response TEXT,
                     last_error TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS traffic_resets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    telegram_id INTEGER NOT NULL,
+                    inbound_id INTEGER NOT NULL,
+                    reset_month TEXT NOT NULL,
+                    reset_at TEXT NOT NULL,
+                    UNIQUE (telegram_id, inbound_id, reset_month)
+                );
                 """
             )
             user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
@@ -240,6 +249,12 @@ class Database:
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_external_id
                 ON payment_orders(external_payment_id)
                 WHERE external_payment_id IS NOT NULL AND external_payment_id != ''
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_traffic_resets_month
+                ON traffic_resets(reset_month)
                 """
             )
 
@@ -885,6 +900,30 @@ class Database:
                     _to_iso(datetime.now(UTC)),
                 ),
             )
+
+    def traffic_reset_was_done(self, telegram_id: int, inbound_id: int, reset_month: str) -> bool:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM traffic_resets
+                WHERE telegram_id = ? AND inbound_id = ? AND reset_month = ?
+                """,
+                (telegram_id, inbound_id, reset_month),
+            ).fetchone()
+        return row is not None
+
+    def mark_traffic_reset_done(self, telegram_id: int, inbound_id: int, reset_month: str) -> bool:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO traffic_resets (
+                    telegram_id, inbound_id, reset_month, reset_at
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (telegram_id, inbound_id, reset_month, _to_iso(datetime.now(UTC))),
+            )
+            return cursor.rowcount > 0
 
 
 def _user_from_row(row: sqlite3.Row) -> User:

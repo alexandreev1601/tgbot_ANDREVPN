@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import secrets
+import sqlite3
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 import httpx
 
@@ -62,12 +63,15 @@ class XuiApi:
 
     async def _resolve_inbound_ids(self) -> list[int]:
         if self.config.vpn_profiles:
-            return [profile.inbound_id for profile in self.config.vpn_profiles]
+            return list(dict.fromkeys(profile.inbound_id for profile in self.config.vpn_profiles))
 
         inbound_id = await self._resolve_inbound_id()
         if inbound_id is None:
             return []
         return [inbound_id]
+
+    async def resolve_inbound_ids(self) -> list[int]:
+        return await self._resolve_inbound_ids()
 
     @property
     def _is_configured(self) -> bool:
@@ -121,6 +125,101 @@ class XuiApi:
         payload = self._client_payload(client_info, subscription_until)
         async with await self._client() as client:
             await self._upsert_client_via_inbound_update(client, client_info.inbound_id, payload)
+
+    async def reset_client_traffic(self, user: User, inbound_id: int) -> None:
+        if not user.xui_email:
+            raise XuiError(f"User {user.telegram_id} has no 3X-UI email")
+        if not user.xui_uuid or not user.xui_sub_id:
+            raise XuiError(f"User {user.telegram_id} has no 3X-UI client identifiers")
+
+        reset_done = False
+        if self.config.xui_db_path and self.config.xui_db_path.exists():
+            reset_done = self._reset_client_traffic_in_local_db(user, inbound_id)
+
+        if not reset_done:
+            raise XuiError(
+                f"Could not reset 3X-UI traffic for user {user.telegram_id} in inbound {inbound_id}. "
+                "No local 3X-UI traffic row was found."
+            )
+
+        if self._is_configured:
+            flow = self._flow_for_inbound(inbound_id)
+            await self._upsert_client(
+                XuiClient(
+                    inbound_id=inbound_id,
+                    email=user.xui_email,
+                    uuid=user.xui_uuid,
+                    sub_id=user.xui_sub_id,
+                    flow=flow,
+                ),
+                user.subscription_until,
+            )
+
+    def _reset_client_traffic_in_local_db(self, user: User, inbound_id: int) -> bool:
+        if not user.xui_email:
+            return False
+
+        expiry_ms = int(user.subscription_until.timestamp() * 1000) if user.subscription_until else 0
+        now_ms = int(datetime.now(UTC).timestamp() * 1000)
+        conn = sqlite3.connect(self.config.xui_db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            traffic_cursor = conn.execute(
+                """
+                UPDATE client_traffics
+                SET up = 0, down = 0, enable = 1, total = ?, expiry_time = ?, reset = 0
+                WHERE inbound_id = ? AND email = ?
+                """,
+                (self.config.xui_total_gb, expiry_ms, inbound_id, user.xui_email),
+            )
+            conn.execute(
+                """
+                UPDATE clients
+                SET enable = 1, total_gb = ?, expiry_time = ?, updated_at = ?
+                WHERE email = ?
+                """,
+                (self.config.xui_total_gb, expiry_ms, now_ms, user.xui_email),
+            )
+            inbound_changed = self._enable_client_in_inbound_settings(conn, inbound_id, user.xui_email, expiry_ms)
+            conn.commit()
+            return traffic_cursor.rowcount > 0 or inbound_changed
+        finally:
+            conn.close()
+
+    def _enable_client_in_inbound_settings(
+        self,
+        conn: sqlite3.Connection,
+        inbound_id: int,
+        email: str,
+        expiry_ms: int,
+    ) -> bool:
+        row = conn.execute("SELECT settings FROM inbounds WHERE id = ?", (inbound_id,)).fetchone()
+        if row is None or not row["settings"]:
+            return False
+
+        settings = json.loads(row["settings"])
+        changed = False
+        for client in settings.get("clients", []):
+            if client.get("email") != email:
+                continue
+            client["enable"] = True
+            client["totalGB"] = self.config.xui_total_gb
+            client["expiryTime"] = expiry_ms
+            client["reset"] = 0
+            changed = True
+
+        if changed:
+            conn.execute(
+                "UPDATE inbounds SET settings = ? WHERE id = ?",
+                (json.dumps(settings, separators=(",", ":")), inbound_id),
+            )
+        return changed
+
+    def _flow_for_inbound(self, inbound_id: int) -> str:
+        for profile in self.config.vpn_profiles:
+            if profile.inbound_id == inbound_id:
+                return profile.flow
+        return self.config.xui_client_flow
 
     async def _try_update_client(
         self,

@@ -65,6 +65,28 @@ The bot will show users a personal subscription link based on their `subId`. If 
 contains several profiles, the same subscription link will return several VLESS nodes, and HAPP will
 let the user choose between them.
 
+### Monthly Traffic Reset
+
+Every active user gets a monthly traffic reset for every configured VPN inbound/profile. The bot stores
+successful resets in its own SQLite table `traffic_resets`, keyed by Telegram user, inbound id, and month.
+This makes the job idempotent: a bot restart or repeated check will not reset the same user twice for the
+same month.
+
+The task runs every 3 hours by default and also runs once soon after bot startup:
+
+```env
+XUI_DB_PATH=/etc/x-ui/x-ui.db
+TRAFFIC_RESET_INTERVAL_SECONDS=10800
+```
+
+For each active user and inbound, the bot resets 3X-UI `client_traffics.up` and `client_traffics.down`
+to `0`, restores `enable=1`, keeps the configured `XUI_TOTAL_GB` limit, and refreshes the client through
+the existing 3X-UI provisioning path. If a reset fails for one inbound, it is not marked as done and the
+bot will retry later. The administrator receives a Telegram notification about failures.
+
+If a client reached the 100 GB limit before reset, they may need to reconnect or refresh the HAPP
+subscription after the reset.
+
 Example multi-profile setup. Emoji at the start of `title` is shown by HAPP as a profile icon,
 while the visible name stays short: `vpn1`, `vpn2`, `vpn3`.
 

@@ -68,6 +68,8 @@ class Config:
     xui_client_flow: str
     xui_total_gb: int
     xui_limit_ip: int
+    xui_db_path: Path
+    traffic_reset_interval_seconds: int
     vpn_subscription_base_url: str
     vpn_public_host: str
     vless_port: int | None
@@ -164,6 +166,8 @@ def load_config() -> Config:
         xui_client_flow=xui_client_flow,
         xui_total_gb=int(_env("XUI_TOTAL_GB", "0")),
         xui_limit_ip=int(_env("XUI_LIMIT_IP", "0")),
+        xui_db_path=Path(_env("XUI_DB_PATH", "/etc/x-ui/x-ui.db")),
+        traffic_reset_interval_seconds=int(_env("TRAFFIC_RESET_INTERVAL_SECONDS", "10800")),
         vpn_subscription_base_url=_env("VPN_SUBSCRIPTION_BASE_URL").rstrip("/"),
         vpn_public_host=vpn_public_host,
         vless_port=vless_port,
