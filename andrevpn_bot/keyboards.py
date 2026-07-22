@@ -30,32 +30,29 @@ def plans_menu(plans: list[Plan], currency: str, back_callback: str = "home") ->
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def payment_method_menu() -> InlineKeyboardMarkup:
+def payment_method_menu(yookassa_enabled: bool = False) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text="TG звездами (автоматически)", callback_data="plans:stars")]]
+    if yookassa_enabled:
+        rows.append([InlineKeyboardButton(text="СБП через ЮKassa (автоматически)", callback_data="plans:sbp")])
+    rows.append([InlineKeyboardButton(text="Назад", callback_data="home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def sbp_plans_menu(plans: list[Plan]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"{plan.title} - {plan.price} рублей", callback_data=f"sbp:create:{plan.code}")]
+        for plan in plans
+    ]
+    rows.append([InlineKeyboardButton(text="Назад", callback_data="plans")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def sbp_payment_menu(order_id: int, confirmation_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="TG звездами (автоматически)", callback_data="plans:stars")],
-            [InlineKeyboardButton(text="Перевод на карту (через менеджера)", callback_data="plans:card")],
-            [InlineKeyboardButton(text="Назад", callback_data="home")],
-        ]
-    )
-
-
-def card_plans_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="1 месяц (150 рублей)", callback_data="cardpay:1")],
-            [InlineKeyboardButton(text="2 месяца (250 рублей)", callback_data="cardpay:2")],
-            [InlineKeyboardButton(text="3 месяца (350 рублей)", callback_data="cardpay:3")],
-            [InlineKeyboardButton(text="Назад", callback_data="plans")],
-        ]
-    )
-
-
-def card_payment_back_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Назад", callback_data="plans:card")],
-            [InlineKeyboardButton(text="Главное меню", callback_data="home")],
+            [InlineKeyboardButton(text="Оплатить через СБП", url=confirmation_url)],
+            [InlineKeyboardButton(text="Проверить оплату", callback_data=f"sbp:check:{order_id}")],
+            [InlineKeyboardButton(text="Назад к тарифам", callback_data="plans:sbp")],
         ]
     )
 
@@ -135,7 +132,6 @@ def admin_menu() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="Статистика", callback_data="admin:stats")],
             [InlineKeyboardButton(text="Добавить подписку по ID", callback_data="admin:add")],
-            [InlineKeyboardButton(text="Подтвердить ручную оплату", callback_data="admin:manual_payment")],
             [InlineKeyboardButton(text="Сервер", callback_data="admin:server")],
             [InlineKeyboardButton(text="Назад", callback_data="home")],
         ]

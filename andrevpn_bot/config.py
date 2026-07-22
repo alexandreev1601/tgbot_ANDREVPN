@@ -47,6 +47,18 @@ class Config:
     payment_title: str
     payment_description: str
     plans: list[Plan]
+    yookassa_enabled: bool
+    yookassa_shop_id: str
+    yookassa_secret_key: str
+    yookassa_api_base_url: str
+    yookassa_return_url: str
+    yookassa_webhook_public_url: str
+    yookassa_listen_host: str
+    yookassa_listen_port: int | None
+    yookassa_cert_file: str
+    yookassa_key_file: str
+    yookassa_timeout_seconds: float
+    sbp_plans: list[Plan]
     xui_base_url: str
     xui_api_token: str
     xui_username: str
@@ -96,6 +108,28 @@ def load_config() -> Config:
     reality_server_name = _env("REALITY_SERVER_NAME", "www.cloudflare.com")
     reality_fingerprint = _env("REALITY_FINGERPRINT", "chrome")
     reality_spider_x = _env("REALITY_SPIDER_X", "/")
+    yookassa_enabled = _parse_bool(_env("YOOKASSA_ENABLED", "false"))
+    yookassa_listen_port = _parse_optional_int(_env("YOOKASSA_LISTEN_PORT", "8443"))
+    yookassa_cert_file = _env("YOOKASSA_CERT_FILE", "/root/cert/panel-l.andreev-it.ru/fullchain.pem")
+    yookassa_key_file = _env("YOOKASSA_KEY_FILE", "/root/cert/panel-l.andreev-it.ru/privkey.pem")
+    yookassa_return_url = _env(
+        "YOOKASSA_RETURN_URL",
+        "https://panel-l.andreev-it.ru:8443/payments/yookassa/return",
+    )
+    yookassa_webhook_public_url = _env(
+        "YOOKASSA_WEBHOOK_PUBLIC_URL",
+        "https://panel-l.andreev-it.ru:8443/payments/yookassa/webhook",
+    )
+    if yookassa_enabled:
+        _validate_yookassa_config(
+            shop_id=_env("YOOKASSA_SHOP_ID"),
+            secret_key=_env("YOOKASSA_SECRET_KEY"),
+            return_url=yookassa_return_url,
+            webhook_public_url=yookassa_webhook_public_url,
+            listen_port=yookassa_listen_port,
+            cert_file=yookassa_cert_file,
+            key_file=yookassa_key_file,
+        )
 
     return Config(
         bot_token=bot_token,
@@ -107,6 +141,20 @@ def load_config() -> Config:
         payment_title=_env("PAYMENT_TITLE", "ANDREVPN"),
         payment_description=_env("PAYMENT_DESCRIPTION", "Продление VPN-подписки ANDREVPN"),
         plans=_parse_plans(_env("PLANS", "month:1 месяц:199:30,quarter:3 месяца:499:90,year:1 год:1490:365")),
+        yookassa_enabled=yookassa_enabled,
+        yookassa_shop_id=_env("YOOKASSA_SHOP_ID"),
+        yookassa_secret_key=_env("YOOKASSA_SECRET_KEY"),
+        yookassa_api_base_url=_env("YOOKASSA_API_BASE_URL", "https://api.yookassa.ru/v3").rstrip("/"),
+        yookassa_return_url=yookassa_return_url,
+        yookassa_webhook_public_url=yookassa_webhook_public_url,
+        yookassa_listen_host=_env("YOOKASSA_LISTEN_HOST", "0.0.0.0"),
+        yookassa_listen_port=yookassa_listen_port,
+        yookassa_cert_file=yookassa_cert_file,
+        yookassa_key_file=yookassa_key_file,
+        yookassa_timeout_seconds=float(_env("YOOKASSA_TIMEOUT_SECONDS", "15")),
+        sbp_plans=_parse_plans(
+            _env("SBP_PLANS", "month:1 месяц:150:30,two_months:2 месяца:250:60,quarter:3 месяца:350:90")
+        ),
         xui_base_url=_env("XUI_BASE_URL").rstrip("/"),
         xui_api_token=_env("XUI_API_TOKEN"),
         xui_username=_env("XUI_USERNAME"),
@@ -167,6 +215,45 @@ def _parse_admin_ids(value: str) -> set[int]:
 
 def _parse_optional_int(value: str) -> int | None:
     return int(value) if value else None
+
+
+def _parse_bool(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _validate_yookassa_config(
+    *,
+    shop_id: str,
+    secret_key: str,
+    return_url: str,
+    webhook_public_url: str,
+    listen_port: int | None,
+    cert_file: str,
+    key_file: str,
+) -> None:
+    missing = []
+    if not shop_id:
+        missing.append("YOOKASSA_SHOP_ID")
+    if not secret_key:
+        missing.append("YOOKASSA_SECRET_KEY")
+    if not return_url:
+        missing.append("YOOKASSA_RETURN_URL")
+    if not webhook_public_url:
+        missing.append("YOOKASSA_WEBHOOK_PUBLIC_URL")
+    if listen_port not in {443, 8443}:
+        missing.append("YOOKASSA_LISTEN_PORT must be 443 or 8443")
+    if not cert_file:
+        missing.append("YOOKASSA_CERT_FILE")
+    if not key_file:
+        missing.append("YOOKASSA_KEY_FILE")
+    if cert_file and not Path(cert_file).exists():
+        missing.append("YOOKASSA_CERT_FILE does not exist")
+    if key_file and not Path(key_file).exists():
+        missing.append("YOOKASSA_KEY_FILE does not exist")
+    if not return_url.startswith("https://") or not webhook_public_url.startswith("https://"):
+        missing.append("YOOKASSA_RETURN_URL and YOOKASSA_WEBHOOK_PUBLIC_URL must use HTTPS")
+    if missing:
+        raise RuntimeError("YooKassa is enabled but config is invalid: " + ", ".join(missing))
 
 
 def _parse_plans(value: str) -> list[Plan]:

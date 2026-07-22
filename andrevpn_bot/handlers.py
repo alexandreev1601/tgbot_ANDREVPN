@@ -16,8 +16,6 @@ from .keyboards import (
     admin_back_menu,
     admin_menu,
     back_menu,
-    card_payment_back_menu,
-    card_plans_menu,
     instruction_done_menu,
     instructions_android_menu,
     instructions_back_menu,
@@ -26,6 +24,8 @@ from .keyboards import (
     main_menu,
     payment_method_menu,
     plans_menu,
+    sbp_payment_menu,
+    sbp_plans_menu,
     support_menu,
     trial_menu,
 )
@@ -33,14 +33,10 @@ from .payments import PaidSubscriptionService
 from .referrals import ReferralGrant, ReferralService
 from .texts import cabinet, connection_link_message, connection_text, format_dt, trial_success_text, trial_text, welcome
 from .xui import XuiApi, XuiError
+from .yookassa import YookassaError, YookassaPaymentService, YookassaVerificationError
 
 
 WELCOME_IMAGE_PATH = Path(__file__).resolve().parent.parent / "assets" / "welcome.png"
-CARD_PAYMENT_PLANS = {
-    "1": ("1 месяц", 150),
-    "2": ("2 месяца", 250),
-    "3": ("3 месяца", 350),
-}
 HAPP_STEPS = (
     (
         "Установите приложение Happ - Proxy Utility",
@@ -101,8 +97,8 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
     router = Router()
     referrals = ReferralService(db)
     paid_subscriptions = PaidSubscriptionService(db, referrals)
+    yookassa = YookassaPaymentService(config, db) if config.yookassa_enabled else None
     admin_add_waiting: set[int] = set()
-    admin_manual_payment_waiting: set[int] = set()
     support_waiting: set[int] = set()
 
     @router.message(CommandStart())
@@ -130,7 +126,6 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
     async def home(callback: CallbackQuery) -> None:
         await callback.answer()
         admin_add_waiting.discard(callback.from_user.id)
-        admin_manual_payment_waiting.discard(callback.from_user.id)
         support_waiting.discard(callback.from_user.id)
         if callback.message:
             await callback.message.edit_reply_markup(reply_markup=None)
@@ -142,32 +137,10 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
             await callback.answer("Нет доступа.", show_alert=True)
             return
         admin_add_waiting.discard(callback.from_user.id)
-        admin_manual_payment_waiting.discard(callback.from_user.id)
         await _show_section(
             callback,
             "<b>Админ панель ANDREVPN</b>\n\nВыберите нужный раздел.",
             admin_menu(),
-        )
-        await callback.answer()
-
-    @router.callback_query(F.data == "admin:manual_payment")
-    async def admin_manual_payment_handler(callback: CallbackQuery) -> None:
-        if not _is_admin(callback.from_user.id, config):
-            await callback.answer("Нет доступа.", show_alert=True)
-            return
-        admin_add_waiting.discard(callback.from_user.id)
-        admin_manual_payment_waiting.add(callback.from_user.id)
-        await _show_section(
-            callback,
-            (
-                "<b>Подтвердить ручную оплату</b>\n\n"
-                "Отправьте ID пользователя и оплаченный срок.\n\n"
-                "Пример:\n<code>443060337 1</code>\n\n"
-                "Где срок: 1, 2 или 3 месяца.\n"
-                "Бот создаст запись оплаты, продлит подписку, добавит клиента во все VPN-профили "
-                "и начислит реферальный бонус, если пользователь пришёл по ссылке."
-            ),
-            admin_back_menu(),
         )
         await callback.answer()
 
@@ -380,7 +353,7 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         await _show_section(
             callback,
             "<b>Оплатить / продлить</b>\n\nВыберите способ оплаты.",
-            payment_method_menu(),
+            payment_method_menu(config.yookassa_enabled),
         )
         await callback.answer()
 
@@ -394,26 +367,103 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         )
         await callback.answer()
 
-    @router.callback_query(F.data == "plans:card")
-    async def card_plans_handler(callback: CallbackQuery) -> None:
+    @router.callback_query(F.data == "plans:sbp")
+    async def sbp_plans_handler(callback: CallbackQuery) -> None:
         _touch_user(callback, db)
+        if yookassa is None:
+            await _show_section(
+                callback,
+                "<b>СБП через ЮKassa</b>\n\nОплата через СБП временно недоступна.",
+                back_menu(),
+            )
+            await callback.answer()
+            return
         await _show_section(
             callback,
-            "<b>Перевод на карту</b>\n\nВыберите срок подписки.",
-            card_plans_menu(),
+            "<b>СБП через ЮKassa</b>\n\nВыберите срок подписки.",
+            sbp_plans_menu(config.sbp_plans),
         )
         await callback.answer()
 
-    @router.callback_query(F.data.startswith("cardpay:"))
-    async def card_pay_handler(callback: CallbackQuery) -> None:
+    @router.callback_query(F.data.startswith("sbp:create:"))
+    async def sbp_create_handler(callback: CallbackQuery) -> None:
         user = _touch_user(callback, db)
-        code = callback.data.split(":", 1)[1]
-        if code not in CARD_PAYMENT_PLANS:
-            await callback.answer("Неизвестный тариф.", show_alert=True)
+        if yookassa is None:
+            await callback.answer("СБП временно недоступна.", show_alert=True)
+            return
+        code = callback.data.split(":", 2)[2]
+        try:
+            plan = _find_plan(config.sbp_plans, code)
+            order = await yookassa.create_sbp_payment(user, plan)
+        except (RuntimeError, YookassaError) as exc:
+            await _show_section(
+                callback,
+                (
+                    "<b>СБП через ЮKassa</b>\n\n"
+                    "Не удалось создать платёж. Попробуйте ещё раз чуть позже."
+                ),
+                sbp_plans_menu(config.sbp_plans),
+            )
+            await callback.answer("Платёж не создан.", show_alert=True)
+            await _notify_admins(callback.message.bot, config, f"YooKassa create payment error for {user.telegram_id}: {exc}")
+            return
+        if not order.confirmation_url:
+            await callback.answer("ЮKassa не вернула ссылку оплаты.", show_alert=True)
             return
 
-        period, amount = CARD_PAYMENT_PLANS[code]
-        await _show_section(callback, _card_payment_text(user.telegram_id, period, amount), card_payment_back_menu())
+        await _show_section(callback, _sbp_order_text(order, config), sbp_payment_menu(order.id, order.confirmation_url))
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("sbp:check:"))
+    async def sbp_check_handler(callback: CallbackQuery) -> None:
+        _touch_user(callback, db)
+        if yookassa is None:
+            await callback.answer("СБП временно недоступна.", show_alert=True)
+            return
+        try:
+            order_id = int(callback.data.split(":", 2)[2])
+            result = await yookassa.check_order(order_id)
+        except (ValueError, LookupError):
+            await callback.answer("Неизвестный тариф.", show_alert=True)
+            return
+        except YookassaVerificationError as exc:
+            await callback.answer("Платёж не прошёл проверку.", show_alert=True)
+            await _notify_admins(callback.message.bot, config, f"YooKassa verification error: {exc}")
+            return
+        except YookassaError as exc:
+            await callback.answer("Не удалось проверить оплату. Попробуйте чуть позже.", show_alert=True)
+            await _notify_admins(callback.message.bot, config, f"YooKassa check error: {exc}")
+            return
+
+        if result.status == "pending":
+            await callback.answer("Оплата ещё не подтверждена.", show_alert=True)
+            return
+        if result.status == "canceled":
+            await _show_section(
+                callback,
+                "<b>Платёж отменён</b>\n\nСоздайте новый платёж и попробуйте снова.",
+                sbp_plans_menu(config.sbp_plans),
+            )
+            await callback.answer()
+            return
+        if result.status != "succeeded" or result.finalization is None:
+            await callback.answer("Платёж пока не подтверждён.", show_alert=True)
+            return
+
+        if not result.finalization.already_processed:
+            await _after_successful_external_payment(
+                callback.message.bot,
+                config,
+                db,
+                xui,
+                yookassa,
+                result.finalization,
+            )
+        await _show_section(
+            callback,
+            "Оплата подтверждена. Подписка ANDREVPN продлена.\n\n" + cabinet(result.finalization.user),
+            main_menu(_is_admin(callback.from_user.id, config)),
+        )
         await callback.answer()
 
     @router.callback_query(F.data.startswith("pay:"))
@@ -506,7 +556,6 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         lambda message: message.from_user is not None
         and message.from_user.id in support_waiting
         and message.from_user.id not in admin_add_waiting
-        and message.from_user.id not in admin_manual_payment_waiting
     )
     async def support_message_handler(message: Message) -> None:
         if message.from_user is None:
@@ -528,16 +577,6 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         if message.from_user is None or not _is_admin(message.from_user.id, config):
             return
         if message.from_user.id not in admin_add_waiting:
-            if message.from_user.id not in admin_manual_payment_waiting:
-                return
-            await _handle_admin_manual_payment(
-                message,
-                config,
-                db,
-                xui,
-                paid_subscriptions,
-                admin_manual_payment_waiting,
-            )
             return
 
         try:
@@ -617,90 +656,66 @@ def _referral_program_text(user, referral_link: str, stats: dict[str, int]) -> s
     )
 
 
-async def _handle_admin_manual_payment(
-    message: Message,
+def _sbp_order_text(order, config: Config) -> str:
+    try:
+        title = _find_plan(config.sbp_plans, order.plan_code).title
+    except RuntimeError:
+        title = order.plan_code
+    return (
+        "<b>СБП через ЮKassa</b>\n\n"
+        f"Тариф: <b>{title}</b>\n"
+        f"Сумма: <b>{_format_rub_kopecks(order.amount_kopecks)}</b>\n\n"
+        "Нажмите кнопку <b>Оплатить через СБП</b>. После оплаты вернитесь в Telegram "
+        "и нажмите <b>Проверить оплату</b>."
+    )
+
+
+async def _after_successful_external_payment(
+    bot,
     config: Config,
     db: Database,
     xui: XuiApi,
-    paid_subscriptions: PaidSubscriptionService,
-    admin_manual_payment_waiting: set[int],
+    yookassa: YookassaPaymentService,
+    finalization,
 ) -> None:
-    try:
-        telegram_id, months = _parse_admin_manual_payment_request(message.text or "")
-        plan = _find_plan_by_months(config.plans, months)
-        amount = _manual_payment_amount(months)
-    except ValueError:
-        await message.answer(
-            "Не понял формат. Отправьте так:\n<code>443060337 1</code>\n\nСрок может быть 1, 2 или 3 месяца.",
-            reply_markup=admin_back_menu(),
-        )
-        return
-
-    user = db.get_or_create_user(telegram_id)
-    result = paid_subscriptions.confirm_payment_and_extend_subscription(
-        user=user,
-        plan=plan,
-        amount=amount,
-        currency="RUB",
-        provider="manual_transfer",
-        external_payment_id=f"manual:{message.from_user.id}:{message.chat.id}:{message.message_id}",
-        confirmed_by=message.from_user.id,
-        admin_comment=f"Manual transfer confirmed by {message.from_user.id}",
-        raw_payload=json.dumps(
-            {
-                "telegram_id": telegram_id,
-                "months": months,
-                "amount": amount,
-                "admin_id": message.from_user.id,
-                "message_id": message.message_id,
-            },
-            ensure_ascii=False,
-        ),
-    )
-    updated_user = result.user
-
+    updated_user = finalization.user
     try:
         await xui.provision_user(db, updated_user)
-        updated_user = db.get_user(user.telegram_id)
+        updated_user = db.get_user(updated_user.telegram_id)
     except XuiError as exc:
-        admin_manual_payment_waiting.discard(message.from_user.id)
-        await message.answer(
-            f"Оплата подтверждена, но подключение в 3X-UI не создалось:\n<code>{exc}</code>",
-            reply_markup=admin_back_menu(),
-        )
-        return
+        await _notify_admins(bot, config, f"Paid YooKassa user {updated_user.telegram_id}, but 3X-UI failed: {exc}")
 
-    admin_manual_payment_waiting.discard(message.from_user.id)
-    referral_note = (
-        f"Реферальный бонус начислен: +{result.referral_grant.reward.reward_days} дней."
-        if result.referral_grant else
-        "У пользователя нет referrer или бонус по этой оплате уже начислялся."
-    )
-    await message.answer(
-        (
-            "<b>Ручная оплата подтверждена</b>\n\n"
-            f"ID: <code>{updated_user.telegram_id}</code>\n"
-            f"Тариф: {plan.title}\n"
-            f"Сумма: {amount} RUB\n"
-            f"Активна до: <b>{format_dt(updated_user.subscription_until)}</b>\n\n"
-            f"{referral_note}"
-        ),
-        reply_markup=admin_back_menu(),
-    )
-    await _notify_user_about_admin_subscription(message.bot, updated_user, plan.days)
-    if result.referral_grant:
-        await _notify_referral_grant(message.bot, result.referral_grant, "payment")
+    try:
+        await bot.send_message(
+            updated_user.telegram_id,
+            "Оплата через СБП прошла успешно. Подписка ANDREVPN продлена.\n\n" + cabinet(updated_user),
+            reply_markup=main_menu(_is_admin(updated_user.telegram_id, config)),
+        )
+    except Exception:
+        pass
+
+    referral_grant = yookassa.referral_grant(finalization)
+    if referral_grant:
+        await _notify_referral_grant(bot, referral_grant, "payment")
+
     await _notify_admins(
-        message.bot,
+        bot,
         config,
         (
-            "<b>Ручная оплата</b>\n"
+            "<b>Оплата через СБП</b>\n"
             f"ID: <code>{updated_user.telegram_id}</code>\n"
-            f"Тариф: {plan.title}\n"
-            f"Сумма: {amount} RUB\n"
+            f"Тариф: {finalization.order.plan_code}\n"
+            f"Сумма: {_format_rub_kopecks(finalization.order.amount_kopecks)}\n"
             f"Активна до: <b>{format_dt(updated_user.subscription_until)}</b>"
         ),
     )
+
+
+def _format_rub_kopecks(amount_kopecks: int) -> str:
+    rubles, kopecks = divmod(amount_kopecks, 100)
+    if kopecks:
+        return f"{rubles},{kopecks:02d} ₽"
+    return f"{rubles} ₽"
 
 
 async def _show_section(callback: CallbackQuery, text: str, reply_markup) -> None:
@@ -757,36 +772,9 @@ def _find_plan(plans: list[Plan], code: str) -> Plan:
     raise RuntimeError(f"Unknown plan: {code}")
 
 
-def _find_plan_by_months(plans: list[Plan], months: int) -> Plan:
-    days_by_months = {1: 30, 2: 60, 3: 90}
-    target_days = days_by_months.get(months)
-    if target_days is None:
-        raise ValueError("Invalid months")
-
-    for plan in plans:
-        if plan.days == target_days:
-            return plan
-    raise ValueError("Plan not configured")
-
-
 def _telegram_amount(plan: Plan, currency: str) -> int:
     zero_decimal = {"XTR", "JPY", "KRW"}
     return plan.price if currency.upper() in zero_decimal else plan.price * 100
-
-
-def _card_payment_text(telegram_id: int, period: str, amount: int) -> str:
-    return (
-        f"<b>Перевод на карту: {period}</b>\n\n"
-        "Для оформления или продления подписки через перевод выполните следующие шаги:\n\n"
-        f"1. Переведите {amount} рублей на карту: <code>2202 2084 9816 2859</code>\n"
-        "2. Сделайте скриншот подтверждения перевода.\n"
-        "3. Отправьте скриншот нашему менеджеру: @zakidoki\n"
-        "4. Вместе со скриншотом обязательно укажите ваш ID.\n"
-        "Его можно найти в личном кабинете этого бота.\n\n"
-        f"Ваш ID: <code>{telegram_id}</code>\n\n"
-        "После проверки платежа менеджер ответит вам и подтвердит оформление или продление подписки. "
-        "Обычно это занимает до 5 минут, но в редких случаях ожидание может составлять до 30 минут."
-    )
 
 
 def _is_admin(user_id: int | None, config: Config) -> bool:
@@ -795,7 +783,9 @@ def _is_admin(user_id: int | None, config: Config) -> bool:
 
 def _admin_stats_text(db: Database, config: Config) -> str:
     stats = db.stats()
-    currency = config.payment_currency.upper()
+    amounts = stats["payments_by_currency"]
+    xtr_amount = amounts.get("XTR", 0)
+    rub_amount = amounts.get("RUB", 0)
     return (
         "<b>Статистика ANDREVPN</b>\n\n"
         f"Всего пользователей: <b>{stats['total_users']}</b>\n"
@@ -803,7 +793,8 @@ def _admin_stats_text(db: Database, config: Config) -> str:
         f"Пробных пользователей: <b>{stats['trial_users']}</b>\n"
         f"Просроченных подписок: <b>{stats['expired_users']}</b>\n\n"
         f"Оплат в этом месяце: <b>{stats['payments_count']}</b>\n"
-        f"Сумма за месяц: <b>{stats['payments_amount']} {currency}</b>\n\n"
+        f"Stars за месяц: <b>{xtr_amount} XTR</b>\n"
+        f"Рубли за месяц: <b>{_format_rub_kopecks(rub_amount)}</b>\n\n"
         f"Реферальных бонусов: <b>{stats['referral_rewards_count']}</b>\n"
         f"Начислено бонусных дней: <b>{stats['referral_reward_days']}</b>"
     )
@@ -818,21 +809,6 @@ def _parse_admin_add_request(text: str) -> tuple[int, int]:
     if telegram_id <= 0 or days <= 0 or days > 3660:
         raise ValueError("Invalid telegram_id or days")
     return telegram_id, days
-
-
-def _parse_admin_manual_payment_request(text: str) -> tuple[int, int]:
-    parts = text.replace(",", " ").split()
-    if len(parts) != 2:
-        raise ValueError("Expected telegram_id and months")
-    telegram_id = int(parts[0])
-    months = int(parts[1])
-    if telegram_id <= 0 or months not in {1, 2, 3}:
-        raise ValueError("Invalid telegram_id or months")
-    return telegram_id, months
-
-
-def _manual_payment_amount(months: int) -> int:
-    return CARD_PAYMENT_PLANS[str(months)][1]
 
 
 def _server_status_text() -> str:

@@ -74,41 +74,89 @@ VPN_PROFILES_JSON=[{"code":"xhttp","title":"🇫🇷 vpn1","inbound_id":4,"host"
 
 ## Payments
 
-The bot supports Telegram Payments. By default, payments use Telegram Stars:
+The bot supports two automatic payment scenarios:
+
+- Telegram Stars through Telegram invoices.
+- SBP through YooKassa redirect payments and webhook verification.
+
+By default, Telegram Stars stay enabled through `PLANS`:
 
 ```env
 PAYMENT_CURRENCY=XTR
 PAYMENT_PROVIDER_TOKEN=
+PLANS=month:1 месяц:80:30,two_months:2 месяца:150:60,quarter:3 месяца:200:90
 ```
 
-For fiat payments, switch the currency and add a provider token:
+SBP tariffs are configured separately and do not reuse Stars prices:
 
 ```env
-PAYMENT_PROVIDER_TOKEN=...
-PAYMENT_CURRENCY=RUB
+SBP_PLANS=month:1 месяц:150:30,two_months:2 месяца:250:60,quarter:3 месяца:350:90
 ```
 
-If `PAYMENT_CURRENCY=XTR`, `PAYMENT_PROVIDER_TOKEN` must stay empty. If another currency is used and
-`PAYMENT_PROVIDER_TOKEN` is empty, the bot will show payment options as unavailable and will ask the user
-to contact the administrator.
+If `YOOKASSA_ENABLED=false`, the SBP button is hidden from users. Telegram Stars continue to work.
+
+### YooKassa SBP
+
+YooKassa SBP uses direct YooKassa API calls, not Telegram provider tokens. The bot creates a local
+`payment_orders` record first, then creates a YooKassa payment with `payment_method_data.type=sbp`,
+`confirmation.type=redirect`, `capture=true`, and a stored `Idempotence-Key`.
+
+The subscription is extended only after a server-side `GET /payments/{payment_id}` confirms:
+
+- `status=succeeded` and `paid=true`;
+- amount and currency match the local order;
+- payment method is `sbp`;
+- YooKassa metadata matches local order id, Telegram id, and plan code.
+
+Required `.env` values:
+
+```env
+YOOKASSA_ENABLED=true
+YOOKASSA_SHOP_ID=
+YOOKASSA_SECRET_KEY=
+YOOKASSA_API_BASE_URL=https://api.yookassa.ru/v3
+YOOKASSA_RETURN_URL=https://panel-l.andreev-it.ru:8443/payments/yookassa/return
+YOOKASSA_WEBHOOK_PUBLIC_URL=https://panel-l.andreev-it.ru:8443/payments/yookassa/webhook
+YOOKASSA_LISTEN_HOST=0.0.0.0
+YOOKASSA_LISTEN_PORT=8443
+YOOKASSA_CERT_FILE=/root/cert/panel-l.andreev-it.ru/fullchain.pem
+YOOKASSA_KEY_FILE=/root/cert/panel-l.andreev-it.ru/privkey.pem
+YOOKASSA_TIMEOUT_SECONDS=15
+SBP_PLANS=month:1 месяц:150:30,two_months:2 месяца:250:60,quarter:3 месяца:350:90
+```
+
+Webhook must be publicly available through HTTPS on TCP port `443` or `8443`. Do not use the existing
+subscription port `2097` for YooKassa notifications. If port `443` is already used by Xray/VLESS Reality,
+use `8443` with the same domain certificate.
+
+Setup in YooKassa:
+
+1. Open the YooKassa merchant cabinet.
+2. Make sure SBP is enabled for the shop.
+3. Copy `shopId` into `YOOKASSA_SHOP_ID` and the secret key into `YOOKASSA_SECRET_KEY`.
+4. In Integration -> HTTP notifications, set `YOOKASSA_WEBHOOK_PUBLIC_URL`.
+5. Enable at least `payment.succeeded` and `payment.canceled`.
+6. Restart the bot and check logs:
+
+```bash
+systemctl restart andrevpn-bot
+systemctl status andrevpn-bot
+journalctl -u andrevpn-bot -n 100 --no-pager
+```
+
+Run a real production payment only after you separately decide to do so. For test shops, SBP availability
+depends on the current YooKassa account settings.
+
+Important for self-employed sellers: accepting payment in YooKassa and issuing a fiscal receipt are
+different processes. Automatic YooKassa receipts for self-employed sellers were discontinued on
+2025-12-29. This bot does not create receipts in "My Tax"; decide the receipt process separately according
+to current YooKassa settings and FNS requirements.
 
 ### What is a payment provider token?
 
-Telegram does not process card payments by itself. A payment provider token is a secret key that connects
-your bot to a payment provider supported by Telegram, for example YooKassa, Stripe, PayMaster, Robokassa,
-or another provider available in BotFather.
-
-Typical setup:
-
-1. Open BotFather.
-2. Choose your bot.
-3. Open payments.
-4. Choose a provider.
-5. Connect your merchant account.
-6. Copy the provider token into `PAYMENT_PROVIDER_TOKEN`.
-
-Without this token, the bot can still accept Telegram Stars payments, but cannot accept automatic fiat
-payments.
+`PAYMENT_PROVIDER_TOKEN` is only for Telegram fiat invoices. ANDREVPN currently uses Telegram Stars
+through Telegram invoices and SBP through direct YooKassa API, so this value can stay empty when
+`PAYMENT_CURRENCY=XTR`.
 
 ## Server Deploy From GitHub
 

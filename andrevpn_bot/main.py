@@ -15,6 +15,7 @@ from .handlers import build_router
 from .reminders import run_subscription_reminders
 from .texts import build_vless_links
 from .xui import XuiApi
+from .yookassa_web import start_yookassa_server
 
 
 async def run() -> None:
@@ -25,10 +26,12 @@ async def run() -> None:
     db.init()
 
     bot = Bot(config.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    xui = XuiApi(config)
     dispatcher = Dispatcher()
-    dispatcher.include_router(build_router(config, db, XuiApi(config)))
+    dispatcher.include_router(build_router(config, db, xui))
 
     subscription_runner = await start_subscription_server(config, db)
+    yookassa_runner = await start_yookassa_server(config, db, bot, xui)
     reminder_task = asyncio.create_task(run_subscription_reminders(bot, db))
     logging.info("ANDREVPN bot started")
     try:
@@ -38,6 +41,8 @@ async def run() -> None:
         await asyncio.gather(reminder_task, return_exceptions=True)
         if subscription_runner:
             await subscription_runner.cleanup()
+        if yookassa_runner:
+            await yookassa_runner.cleanup()
 
 
 async def start_subscription_server(config, db: Database):
