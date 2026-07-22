@@ -12,6 +12,54 @@ Telegram bot for selling and managing ANDREVPN subscriptions with 3X-UI integrat
 - Automatic subscription expiration reminders 3 days, 1 day, and 1 hour before expiration.
 - SQLite storage for users and payments.
 
+## Telegram UX
+
+The bot uses two Telegram navigation layers:
+
+- A persistent reply keyboard under the input field for the main sections.
+- Inline buttons inside messages for contextual actions such as choosing a tariff, checking SBP payment,
+  copying links, browsing instruction steps, confirming admin actions, and going back.
+
+Regular user keyboard:
+
+```text
+👤 Моя подписка     💳 Оплатить
+🔗 Подключить VPN   📖 Инструкция
+🎁 Пригласить друга 🆘 Поддержка
+```
+
+Administrators from `ADMIN_IDS` also see:
+
+```text
+⚙️ Админ-панель
+```
+
+The welcome image from `assets/welcome.png` is sent only on `/start`. Internal screens use compact text
+cards so the chat is not filled with repeated banners.
+
+Bot commands:
+
+```text
+/start   - главное меню
+/help    - краткая навигация
+/cancel  - отменить текущий ввод
+/profile - моя подписка
+/connect - получить подключение
+/pay     - оплата
+```
+
+Manual smoke-test without real payment:
+
+1. Send `/start` and check that the persistent keyboard appears.
+2. Open `👤 Моя подписка`; active, expired, and inactive users should see different compact cards.
+3. Open `🔗 Подключить VPN`; active users should see one personal link and a copy button when Telegram allows it.
+4. Open `📖 Инструкция`; choose Android or iPhone / iPad and move through steps one by one.
+5. Open `🎁 Пригласить друга`; verify copy and share buttons.
+6. Open `🆘 Поддержка`; choose a category, then operator, send a test message, and cancel.
+7. As an admin, open `⚙️ Админ-панель` and test manual subscription grant cancellation before confirmation.
+8. For SBP, create an order only in a controlled test flow and use `Проверить оплату`; do not run a real payment
+   during smoke-testing unless you explicitly intend to.
+
 ## Quick Start
 
 1. Create a bot with BotFather and get `BOT_TOKEN`.

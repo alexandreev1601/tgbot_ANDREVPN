@@ -4,93 +4,125 @@ import json
 import os
 import shutil
 import subprocess
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from html import escape
 from pathlib import Path
 
 from aiogram import F, Router
-from aiogram.filters import CommandStart
-from aiogram.types import CallbackQuery, FSInputFile, LabeledPrice, Message, PreCheckoutQuery
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.filters import Command, CommandStart
+from aiogram.types import CallbackQuery, FSInputFile, InputMediaPhoto, LabeledPrice, Message, PreCheckoutQuery
 
 from .config import Config, Plan
 from .db import ActiveSubscriptionError, Database, TrialAlreadyUsedError
 from .keyboards import (
+    BTN_ADMIN,
+    BTN_CANCEL_SUPPORT,
+    BTN_CONNECT,
+    BTN_INSTRUCTIONS,
+    BTN_PAY,
+    BTN_PROFILE,
+    BTN_REFERRALS,
+    BTN_SUPPORT,
+    COPY_TEXT_LIMIT,
+    HAPP_DOWNLOAD_URL,
+    MAIN_REPLY_BUTTONS,
     admin_back_menu,
+    admin_grant_confirm_menu,
+    admin_grant_days_menu,
     admin_menu,
     back_menu,
-    instruction_done_menu,
+    connection_menu,
+    home_actions_menu,
+    inactive_connection_menu,
+    instruction_step_menu,
     instructions_android_menu,
-    instructions_back_menu,
     instructions_ios_menu,
     instructions_os_menu,
-    main_menu,
+    main_reply_keyboard,
     payment_method_menu,
     plans_menu,
+    profile_menu,
+    referrals_menu,
     sbp_payment_menu,
     sbp_plans_menu,
-    support_menu,
+    success_menu,
+    support_cancel_keyboard,
+    support_categories_menu,
+    support_hint_menu,
     trial_menu,
 )
 from .payments import PaidSubscriptionService
 from .referrals import ReferralGrant, ReferralService
-from .texts import cabinet, connection_link_message, connection_text, format_dt, trial_success_text, trial_text, welcome
+from .texts import (
+    cabinet,
+    connection_link,
+    connection_text,
+    format_date,
+    format_dt,
+    home_card,
+    profile_card,
+    trial_success_text,
+    trial_text,
+    welcome,
+)
 from .xui import XuiApi, XuiError
 from .yookassa import YookassaError, YookassaPaymentService, YookassaVerificationError
 
 
 WELCOME_IMAGE_PATH = Path(__file__).resolve().parent.parent / "assets" / "welcome.png"
+ASSETS_PATH = Path(__file__).resolve().parent.parent / "assets"
+MAX_ADMIN_GRANT_DAYS = 3660
+
 HAPP_STEPS = (
-    (
-        "Установите приложение Happ - Proxy Utility",
-        Path(__file__).resolve().parent.parent / "assets" / "happ_step_3.jpg",
-    ),
-    (
-        'В боте откройте раздел "Получить подключение" и скопируйте персональную ссылку',
-        Path(__file__).resolve().parent.parent / "assets" / "happ_step_2.jpg",
-    ),
-    (
-        'Зайдите в Happ - Proxy Utility и нажмите "Из Буфера" -> Разрешить Вставку',
-        Path(__file__).resolve().parent.parent / "assets" / "happ_step_1.jpg",
-    ),
+    ("Установите приложение Happ - Proxy Utility", ASSETS_PATH / "happ_step_3.jpg"),
+    ('В боте откройте раздел "Подключить VPN" и скопируйте персональную ссылку', ASSETS_PATH / "happ_step_2.jpg"),
+    ('Зайдите в Happ - Proxy Utility и нажмите "Из Буфера" -> Разрешить Вставку', ASSETS_PATH / "happ_step_1.jpg"),
 )
 ANDROID_HAPP_STEPS = (
-    (
-        "Установите приложение Happ - Proxy Utility",
-        Path(__file__).resolve().parent.parent / "assets" / "android_happ_step_1.png",
-    ),
+    ("Установите приложение Happ - Proxy Utility", ASSETS_PATH / "android_happ_step_1.png"),
     *HAPP_STEPS[1:],
 )
-GOOGLEPLAY_HAPP_STEP = (
-    "Google Play может удалить HAPP из Play Market, из-за этого нужно скачать приложение напрямую.\n\n"
-    'Перейдите по ссылке: <a href="https://www.happ.su/main/ru">https://www.happ.su/main/ru</a> '
-    'и выберите под пунктом Android "Download APK". Начнется скачивание установочного файла. '
-    "После скачивания установите его. HAPP должен появиться у вас на телефоне.",
-    Path(__file__).resolve().parent.parent / "assets" / "googleplay_happ_apk.png",
+GOOGLEPLAY_HAPP_STEPS = (
+    (
+        "Google Play может удалить HAPP из Play Market, из-за этого нужно скачать приложение напрямую.\n\n"
+        f'Перейдите по ссылке: <a href="{HAPP_DOWNLOAD_URL}">{HAPP_DOWNLOAD_URL}</a> '
+        'и выберите под пунктом Android "Download APK". Начнется скачивание установочного файла. '
+        "После скачивания установите его. HAPP должен появиться у вас на телефоне.",
+        ASSETS_PATH / "googleplay_happ_apk.png",
+    ),
 )
 APPSTORE_STEPS = (
     (
-        "1. В данный момент Happ недоступен в Российском App Store. Но в зарубежном он есть. "
-        "Чтобы у вас появились недоступные приложения нужно поменять регион. "
+        "В данный момент Happ недоступен в Российском App Store. Но в зарубежном он есть. "
+        "Чтобы у вас появились недоступные приложения, нужно поменять регион. "
         "Так же появятся приложения такие как ChatGPT, Google Gemini, Grok и т.д. "
         "Для этого перейдите в свой аккаунт App Store.",
-        Path(__file__).resolve().parent.parent / "assets" / "appstore_step_1.jpg",
+        ASSETS_PATH / "appstore_step_1.jpg",
     ),
+    ("Перейдите в управление аккаунтом.", ASSETS_PATH / "appstore_step_2.jpg"),
+    ('Выберите пункт "Страна и регион", найдите и выберите "Соединенные штаты".', ASSETS_PATH / "appstore_step_3.jpg"),
     (
-        "2. Перейдите в управление аккаунтом.",
-        Path(__file__).resolve().parent.parent / "assets" / "appstore_step_2.jpg",
-    ),
-    (
-        '3. Выберите пункт "Страна и регион", найдите и выберите "Соединенные штаты".',
-        Path(__file__).resolve().parent.parent / "assets" / "appstore_step_3.jpg",
-    ),
-    (
-        "4. Введите эти данные. Эти данные сгенерированы и не существующие. "
+        "Введите эти данные. Эти данные сгенерированы и не существующие. "
         "Либо можно сгенерировать свои данные и ввести их.",
-        Path(__file__).resolve().parent.parent / "assets" / "appstore_step_4.jpg",
+        ASSETS_PATH / "appstore_step_4.jpg",
     ),
-    (
-        "5. Готово! Сейчас перейдите в поиск приложений и у вас появится приложение HAPP, v2RayTun, AI приложения.",
-        None,
-    ),
+    ("Готово! Сейчас перейдите в поиск приложений и у вас появится приложение HAPP, v2RayTun, AI приложения.", None),
 )
+INSTRUCTION_SETS = {
+    "ios_happ": HAPP_STEPS,
+    "android_happ": ANDROID_HAPP_STEPS,
+    "ios_appstore": APPSTORE_STEPS,
+    "android_googleplay": GOOGLEPLAY_HAPP_STEPS,
+}
+
+
+@dataclass
+class AdminGrantState:
+    step: str
+    target_id: int | None = None
+    days: int | None = None
 
 
 def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
@@ -98,7 +130,7 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
     referrals = ReferralService(db)
     paid_subscriptions = PaidSubscriptionService(db, referrals)
     yookassa = YookassaPaymentService(config, db) if config.yookassa_enabled else None
-    admin_add_waiting: set[int] = set()
+    admin_grants: dict[int, AdminGrantState] = {}
     support_waiting: set[int] = set()
 
     @router.message(CommandStart())
@@ -110,191 +142,330 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         user = referrals.ensure_referral_code(user)
         referrals.bind_from_start_argument(user, _start_argument(message.text), is_new_user=is_new_user)
         if is_new_user:
-            await _notify_admins(
-                message.bot,
-                config,
-                (
-                    "<b>Новый клиент</b>\n"
-                    f"ID: <code>{message.from_user.id}</code>\n"
-                    f"Username: @{message.from_user.username}" if message.from_user.username else
-                    f"<b>Новый клиент</b>\nID: <code>{message.from_user.id}</code>\nUsername: нет"
-                ),
-            )
-        await _send_home(message, config, message.from_user.id)
+            await _notify_new_user(message, config)
+        await message.answer(
+            "Меню закреплено под полем ввода.",
+            reply_markup=main_reply_keyboard(_is_admin(message.from_user.id, config)),
+        )
+        await _send_start_home(message, config, user)
+
+    @router.message(Command("help"))
+    async def help_command(message: Message) -> None:
+        await message.answer(
+            "Выберите нужный раздел в меню под полем ввода. "
+            "Команды тоже работают: /profile, /connect, /pay, /cancel.",
+            reply_markup=main_reply_keyboard(_message_is_admin(message, config)),
+        )
+
+    @router.message(Command("cancel"))
+    async def cancel_command(message: Message) -> None:
+        if message.from_user is None:
+            return
+        admin_grants.pop(message.from_user.id, None)
+        support_waiting.discard(message.from_user.id)
+        await message.answer(
+            "Текущий ввод отменен.",
+            reply_markup=main_reply_keyboard(_is_admin(message.from_user.id, config)),
+        )
+
+    @router.message(Command("profile"))
+    async def profile_command(message: Message) -> None:
+        if message.from_user is None:
+            return
+        user = db.upsert_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
+        await message.answer(profile_card(user), reply_markup=profile_menu(is_active=user.is_active, trial_available=_trial_available(user)))
+
+    @router.message(Command("connect"))
+    async def connect_command(message: Message) -> None:
+        if message.from_user is None:
+            return
+        user = db.upsert_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
+        await _send_connection_from_message(message, user, config, db, xui)
+
+    @router.message(Command("pay"))
+    async def pay_command(message: Message) -> None:
+        if message.from_user is None:
+            return
+        db.upsert_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
+        await message.answer("<b>Оплата</b>\n\nВыберите способ оплаты.", reply_markup=payment_method_menu(config.yookassa_enabled))
+
+    @router.message(F.text == BTN_PROFILE)
+    async def profile_button(message: Message) -> None:
+        await profile_command(message)
+
+    @router.message(F.text == BTN_PAY)
+    async def pay_button(message: Message) -> None:
+        await pay_command(message)
+
+    @router.message(F.text == BTN_CONNECT)
+    async def connect_button(message: Message) -> None:
+        await connect_command(message)
+
+    @router.message(F.text == BTN_INSTRUCTIONS)
+    async def instructions_button(message: Message) -> None:
+        if message.from_user is None:
+            return
+        db.upsert_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
+        await message.answer("📖 <b>Инструкция по подключению</b>\n\nВыберите операционную систему.", reply_markup=instructions_os_menu())
+
+    @router.message(F.text == BTN_REFERRALS)
+    async def referrals_button(message: Message) -> None:
+        if message.from_user is None:
+            return
+        user = referrals.ensure_referral_code(db.upsert_user(message.from_user.id, message.from_user.username, message.from_user.first_name))
+        await _send_referrals_from_message(message, referrals, user)
+
+    @router.message(F.text == BTN_SUPPORT)
+    async def support_button(message: Message) -> None:
+        if message.from_user is None:
+            return
+        db.upsert_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
+        await message.answer("🆘 <b>Поддержка</b>\n\nВыберите тему вопроса.", reply_markup=support_categories_menu())
+
+    @router.message(F.text == BTN_ADMIN)
+    async def admin_button(message: Message) -> None:
+        if message.from_user is None or not _is_admin(message.from_user.id, config):
+            await message.answer("Нет доступа.")
+            return
+        await message.answer("⚙️ <b>Админ-панель</b>\n\nВыберите действие.", reply_markup=admin_menu())
+
+    @router.message(F.text == BTN_CANCEL_SUPPORT)
+    async def cancel_support_button(message: Message) -> None:
+        if message.from_user is None:
+            return
+        support_waiting.discard(message.from_user.id)
+        await message.answer(
+            "Обращение отменено.",
+            reply_markup=main_reply_keyboard(_is_admin(message.from_user.id, config)),
+        )
+
+    @router.callback_query(F.data == "noop")
+    async def noop(callback: CallbackQuery) -> None:
+        await callback.answer()
 
     @router.callback_query(F.data == "home")
     async def home(callback: CallbackQuery) -> None:
         await callback.answer()
-        admin_add_waiting.discard(callback.from_user.id)
+        restore_reply_keyboard = callback.from_user.id in support_waiting
+        admin_grants.pop(callback.from_user.id, None)
         support_waiting.discard(callback.from_user.id)
-        if callback.message:
-            await callback.message.edit_reply_markup(reply_markup=None)
-            await _send_home(callback.message, config, callback.from_user.id)
+        user = _touch_user(callback, db)
+        await _show_section(callback, home_card(user, config), home_actions_menu(is_active=user.is_active, trial_available=_trial_available(user)))
+        if restore_reply_keyboard and callback.message:
+            await callback.message.answer(
+                "Основная клавиатура восстановлена.",
+                reply_markup=main_reply_keyboard(_is_admin(callback.from_user.id, config)),
+            )
 
     @router.callback_query(F.data == "admin")
     async def admin_handler(callback: CallbackQuery) -> None:
         if not _is_admin(callback.from_user.id, config):
             await callback.answer("Нет доступа.", show_alert=True)
             return
-        admin_add_waiting.discard(callback.from_user.id)
-        await _show_section(
-            callback,
-            "<b>Админ панель ANDREVPN</b>\n\nВыберите нужный раздел.",
-            admin_menu(),
-        )
+        admin_grants.pop(callback.from_user.id, None)
         await callback.answer()
+        await _show_section(callback, "⚙️ <b>Админ-панель</b>\n\nВыберите действие.", admin_menu())
 
     @router.callback_query(F.data == "admin:stats")
     async def admin_stats_handler(callback: CallbackQuery) -> None:
         if not _is_admin(callback.from_user.id, config):
             await callback.answer("Нет доступа.", show_alert=True)
             return
-        await _show_section(callback, _admin_stats_text(db, config), admin_back_menu())
         await callback.answer()
+        await _show_section(callback, _admin_stats_text(db, config), admin_back_menu())
 
     @router.callback_query(F.data == "admin:add")
     async def admin_add_handler(callback: CallbackQuery) -> None:
         if not _is_admin(callback.from_user.id, config):
             await callback.answer("Нет доступа.", show_alert=True)
             return
-        admin_add_waiting.add(callback.from_user.id)
+        admin_grants[callback.from_user.id] = AdminGrantState(step="await_id")
+        await callback.answer()
+        await _show_section(
+            callback,
+            "➕ <b>Выдать подписку</b>\n\nОтправьте Telegram ID пользователя одним сообщением.",
+            admin_back_menu(),
+        )
+
+    @router.callback_query(F.data.startswith("admin:add:days:"))
+    async def admin_add_days_handler(callback: CallbackQuery) -> None:
+        if not _is_admin(callback.from_user.id, config):
+            await callback.answer("Нет доступа.", show_alert=True)
+            return
+        state = admin_grants.get(callback.from_user.id)
+        if state is None or state.target_id is None:
+            await callback.answer("Сначала введите Telegram ID.", show_alert=True)
+            return
+        days = int(callback.data.rsplit(":", 1)[1])
+        state.days = days
+        state.step = "confirm"
+        await callback.answer()
+        await _show_admin_grant_confirmation(callback, db, state)
+
+    @router.callback_query(F.data == "admin:add:custom")
+    async def admin_add_custom_handler(callback: CallbackQuery) -> None:
+        if not _is_admin(callback.from_user.id, config):
+            await callback.answer("Нет доступа.", show_alert=True)
+            return
+        state = admin_grants.get(callback.from_user.id)
+        if state is None or state.target_id is None:
+            await callback.answer("Сначала введите Telegram ID.", show_alert=True)
+            return
+        state.step = "await_days"
+        await callback.answer()
+        await _show_section(
+            callback,
+            f"ID: <code>{state.target_id}</code>\n\nОтправьте срок подписки в днях числом.",
+            admin_back_menu(),
+        )
+
+    @router.callback_query(F.data == "admin:add:cancel")
+    async def admin_add_cancel_handler(callback: CallbackQuery) -> None:
+        if not _is_admin(callback.from_user.id, config):
+            await callback.answer("Нет доступа.", show_alert=True)
+            return
+        admin_grants.pop(callback.from_user.id, None)
+        await callback.answer("Отменено.")
+        await _show_section(callback, "⚙️ <b>Админ-панель</b>\n\nВыберите действие.", admin_menu())
+
+    @router.callback_query(F.data == "admin:add:confirm")
+    async def admin_add_confirm_handler(callback: CallbackQuery) -> None:
+        if not _is_admin(callback.from_user.id, config):
+            await callback.answer("Нет доступа.", show_alert=True)
+            return
+        state = admin_grants.get(callback.from_user.id)
+        if state is None or state.target_id is None or state.days is None:
+            await callback.answer("Нет данных для выдачи.", show_alert=True)
+            return
+
+        user = db.get_or_create_user(state.target_id)
+        updated_user = db.extend_subscription(user.telegram_id, state.days)
+        try:
+            await xui.provision_user(db, updated_user)
+            updated_user = db.get_user(user.telegram_id)
+        except XuiError as exc:
+            await callback.answer("Подписка продлена, но XUI не обновился.", show_alert=True)
+            await _show_section(
+                callback,
+                f"Подписка продлена, но подключение в 3X-UI не создалось:\n<code>{escape(str(exc))}</code>",
+                admin_back_menu(),
+            )
+            return
+
+        admin_grants.pop(callback.from_user.id, None)
+        await callback.answer("Подписка выдана.")
         await _show_section(
             callback,
             (
-                "<b>Добавить подписку по Telegram ID</b>\n\n"
-                "Отправьте следующим сообщением ID пользователя и срок в днях.\n\n"
-                "Пример:\n<code>443060337 30</code>\n\n"
-                "Бот создаст пользователя, продлит подписку и добавит клиента во все VPN-профили."
+                "✅ <b>Подписка выдана</b>\n\n"
+                f"ID: <code>{updated_user.telegram_id}</code>\n"
+                f"Срок: {state.days} дней\n"
+                f"Активна до: <b>{format_date(updated_user.subscription_until)}</b>"
             ),
             admin_back_menu(),
         )
-        await callback.answer()
+        await _notify_user_about_admin_subscription(callback.message.bot, updated_user, state.days)
+        await _notify_admins(
+            callback.message.bot,
+            config,
+            f"<b>Ручная выдача подписки</b>\nID: <code>{updated_user.telegram_id}</code>\nСрок: {state.days} дней",
+        )
 
     @router.callback_query(F.data == "admin:server")
     async def admin_server_handler(callback: CallbackQuery) -> None:
         if not _is_admin(callback.from_user.id, config):
             await callback.answer("Нет доступа.", show_alert=True)
             return
+        await callback.answer()
         await _show_section(callback, _server_status_text(), admin_back_menu())
-        await callback.answer()
 
-    @router.callback_query(F.data == "cabinet")
-    async def cabinet_handler(callback: CallbackQuery) -> None:
+    @router.callback_query(F.data.in_({"profile", "cabinet"}))
+    async def profile_handler(callback: CallbackQuery) -> None:
         user = _touch_user(callback, db)
-        await _show_section(callback, cabinet(user), back_menu())
         await callback.answer()
+        await _show_section(callback, profile_card(user), profile_menu(is_active=user.is_active, trial_available=_trial_available(user)))
 
     @router.callback_query(F.data == "referrals")
     async def referrals_handler(callback: CallbackQuery) -> None:
         user = referrals.ensure_referral_code(_touch_user(callback, db))
-        bot_info = await callback.bot.get_me()
-        if not bot_info.username:
-            await callback.answer("Не удалось получить имя бота.", show_alert=True)
-            return
-        link = referrals.referral_link(user, bot_info.username)
-        await _show_section(callback, _referral_program_text(user, link, referrals.stats(user)), back_menu())
         await callback.answer()
+        if callback.message:
+            await _send_referrals_from_message(callback.message, referrals, user, callback=callback)
 
     @router.callback_query(F.data == "support")
     async def support_handler(callback: CallbackQuery) -> None:
-        user = _touch_user(callback, db)
-        support_waiting.add(user.telegram_id)
-        await _show_section(
-            callback,
-            (
-                "<b>Вопросы и Поддержка</b>\n\n"
-                "Опишите вопрос одним или несколькими сообщениями. "
-                "Можно отправить текст, скриншот или фото ошибки.\n\n"
-                "Ваше обращение будет передано в поддержку."
-            ),
-            support_menu(),
-        )
+        restore_reply_keyboard = callback.from_user.id in support_waiting
+        support_waiting.discard(callback.from_user.id)
+        _touch_user(callback, db)
         await callback.answer()
+        await _show_section(callback, "🆘 <b>Поддержка</b>\n\nВыберите тему вопроса.", support_categories_menu())
+        if restore_reply_keyboard and callback.message:
+            await callback.message.answer(
+                "Основная клавиатура восстановлена.",
+                reply_markup=main_reply_keyboard(_is_admin(callback.from_user.id, config)),
+            )
+
+    @router.callback_query(F.data.startswith("support:"))
+    async def support_category_handler(callback: CallbackQuery) -> None:
+        user = _touch_user(callback, db)
+        action = callback.data.split(":", 1)[1]
+        await callback.answer()
+        if action == "operator":
+            support_waiting.add(user.telegram_id)
+            await _show_section(
+                callback,
+                (
+                    "👨‍💻 <b>Оператор</b>\n\n"
+                    "Отправьте следующим сообщением вопрос, фото или скриншот. "
+                    "Мы передадим обращение администратору."
+                ),
+                back_menu("support"),
+            )
+            if callback.message:
+                await callback.message.answer("Ожидаю сообщение для поддержки.", reply_markup=support_cancel_keyboard())
+            return
+        if action == "done":
+            await _show_section(callback, "Отлично. Главное меню доступно ниже.", back_menu("home"))
+            return
+        await _show_section(callback, _support_hint_text(action), support_hint_menu())
 
     @router.callback_query(F.data == "instructions")
     async def instructions_handler(callback: CallbackQuery) -> None:
         _touch_user(callback, db)
-        await _show_section(
-            callback,
-            "<b>Инструкция по подключению</b>\n\nВыберите операционную систему.",
-            instructions_os_menu(),
-        )
         await callback.answer()
+        await _show_section(callback, "📖 <b>Инструкция по подключению</b>\n\nВыберите операционную систему.", instructions_os_menu())
 
     @router.callback_query(F.data == "instructions:android")
     async def instructions_android_handler(callback: CallbackQuery) -> None:
         _touch_user(callback, db)
-        await _show_section(
-            callback,
-            "<b>Android</b>\n\nВыберите нужный раздел.",
-            instructions_android_menu(),
-        )
         await callback.answer()
-
-    @router.callback_query(F.data == "instructions:android:happ")
-    async def instructions_android_happ_handler(callback: CallbackQuery) -> None:
-        _touch_user(callback, db)
-        await callback.answer()
-        await _show_section(
-            callback,
-            "<b>Как подключить подписку к HAPP</b>\n\nИнструкция отправлена сообщениями ниже.",
-            instructions_android_menu(),
-        )
-        if callback.message:
-            await _send_happ_instruction(callback.message, ANDROID_HAPP_STEPS)
-
-    @router.callback_query(F.data == "instructions:android:googleplay")
-    async def instructions_android_googleplay_handler(callback: CallbackQuery) -> None:
-        _touch_user(callback, db)
-        await _show_section(
-            callback,
-            "<b>Что делать если в Google Play нет HAPP</b>\n\nИнструкция отправлена сообщением ниже.",
-            instructions_android_menu(),
-        )
-        await callback.answer()
-        if callback.message:
-            await _send_googleplay_instruction(callback.message)
+        await _show_section(callback, "🤖 <b>Android</b>\n\nВыберите нужный раздел.", instructions_android_menu())
 
     @router.callback_query(F.data == "instructions:ios")
     async def instructions_ios_handler(callback: CallbackQuery) -> None:
         _touch_user(callback, db)
-        await _show_section(
-            callback,
-            "<b>IOS</b>\n\nВыберите нужный раздел.",
-            instructions_ios_menu(),
-        )
         await callback.answer()
+        await _show_section(callback, "🍎 <b>iPhone / iPad</b>\n\nВыберите нужный раздел.", instructions_ios_menu())
 
-    @router.callback_query(F.data == "instructions:ios:happ")
-    async def happ_handler(callback: CallbackQuery) -> None:
-        _touch_user(callback, db)
+    @router.callback_query(F.data.startswith("instr:"))
+    async def instruction_step_handler(callback: CallbackQuery) -> None:
+        user = _touch_user(callback, db)
         await callback.answer()
-        await _show_section(
-            callback,
-            "<b>Как подключить подписку к HAPP</b>\n\nИнструкция отправлена сообщениями ниже.",
-            instructions_ios_menu(),
-        )
-        if callback.message:
-            await _send_happ_instruction(callback.message)
-
-    @router.callback_query(F.data == "instructions:ios:appstore")
-    async def instructions_ios_appstore_handler(callback: CallbackQuery) -> None:
-        _touch_user(callback, db)
-        await _show_section(
-            callback,
-            "<b>Что делать если в App Store нет HAPP</b>\n\nИнструкция отправлена сообщениями ниже.",
-            instructions_ios_menu(),
-        )
-        await callback.answer()
-        if callback.message:
-            await _send_appstore_instruction(callback.message)
+        _, key, raw_index = callback.data.split(":", 2)
+        steps = INSTRUCTION_SETS.get(key)
+        if not steps:
+            await _show_section(callback, "Инструкция не найдена.", instructions_os_menu())
+            return
+        index = max(0, min(int(raw_index), len(steps) - 1))
+        link = connection_link(user, config) if key in {"ios_happ", "android_happ"} and index == 1 else None
+        await _show_instruction_step(callback, key, index, steps, link)
 
     @router.callback_query(F.data == "trial")
     async def trial_handler(callback: CallbackQuery) -> None:
         user = _touch_user(callback, db)
-        keyboard = trial_menu() if user.trial_used_at is None and not user.is_active else back_menu()
-        await _show_section(callback, trial_text(user), keyboard)
+        keyboard = trial_menu() if _trial_available(user) else back_menu("home")
         await callback.answer()
+        await _show_section(callback, trial_text(user), keyboard)
 
     @router.callback_query(F.data == "trial:activate")
     async def trial_activate_handler(callback: CallbackQuery) -> None:
@@ -302,11 +473,11 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         try:
             updated_user = db.activate_trial(user.telegram_id, days=3)
         except TrialAlreadyUsedError:
-            await _show_section(callback, trial_text(db.get_user(user.telegram_id)), back_menu())
+            await _show_section(callback, trial_text(db.get_user(user.telegram_id)), back_menu("home"))
             await callback.answer("Пробный период уже был использован.", show_alert=True)
             return
         except ActiveSubscriptionError:
-            await _show_section(callback, trial_text(db.get_user(user.telegram_id)), back_menu())
+            await _show_section(callback, trial_text(db.get_user(user.telegram_id)), back_menu("home"))
             await callback.answer("У вас уже есть активная подписка.", show_alert=True)
             return
 
@@ -318,8 +489,8 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
             await _notify_admins(callback.message.bot, config, f"Trial user {user.telegram_id}, but 3X-UI failed: {exc}")
             return
 
-        await _show_section(callback, trial_success_text(updated_user), back_menu())
         await callback.answer("Пробная подписка активирована.")
+        await _show_section(callback, trial_success_text(updated_user), success_menu())
         referral_grant = referrals.grant_trial_reward(updated_user)
         if referral_grant:
             await _notify_referral_grant(callback.message.bot, referral_grant, "trial")
@@ -332,58 +503,34 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
     @router.callback_query(F.data == "connection")
     async def connection_handler(callback: CallbackQuery) -> None:
         user = _touch_user(callback, db)
-        if user.is_active:
-            try:
-                await xui.provision_user(db, user)
-                user = db.get_user(user.telegram_id)
-            except XuiError as exc:
-                await callback.answer("Не удалось создать подключение, администратор уже получил ошибку.", show_alert=True)
-                await _notify_admins(callback.message.bot, config, f"3X-UI error for {user.telegram_id}: {exc}")
-                return
-
         await callback.answer()
-        await _show_section(callback, connection_text(user, config), back_menu())
-        link_message = connection_link_message(user, config)
-        if link_message and callback.message:
-            await callback.message.answer(link_message)
+        await _show_connection_from_callback(callback, user, config, db, xui)
 
     @router.callback_query(F.data == "plans")
     async def plans_handler(callback: CallbackQuery) -> None:
         _touch_user(callback, db)
-        await _show_section(
-            callback,
-            "<b>Оплатить / продлить</b>\n\nВыберите способ оплаты.",
-            payment_method_menu(config.yookassa_enabled),
-        )
         await callback.answer()
+        await _show_section(callback, "<b>Оплата</b>\n\nВыберите способ оплаты.", payment_method_menu(config.yookassa_enabled))
 
     @router.callback_query(F.data == "plans:stars")
     async def stars_plans_handler(callback: CallbackQuery) -> None:
         _touch_user(callback, db)
+        await callback.answer()
         await _show_section(
             callback,
-            "<b>TG звездами (автоматически)</b>\n\nВыберите срок подписки.",
+            "<b>Telegram Stars</b>\n\nВыберите срок подписки.",
             plans_menu(config.plans, config.payment_currency, back_callback="plans"),
         )
-        await callback.answer()
 
     @router.callback_query(F.data == "plans:sbp")
     async def sbp_plans_handler(callback: CallbackQuery) -> None:
         _touch_user(callback, db)
         if yookassa is None:
-            await _show_section(
-                callback,
-                "<b>СБП через ЮKassa</b>\n\nОплата через СБП временно недоступна.",
-                back_menu(),
-            )
             await callback.answer()
+            await _show_section(callback, "<b>СБП через ЮKassa</b>\n\nОплата через СБП временно недоступна.", back_menu("plans"))
             return
-        await _show_section(
-            callback,
-            "<b>СБП через ЮKassa</b>\n\nВыберите срок подписки.",
-            sbp_plans_menu(config.sbp_plans),
-        )
         await callback.answer()
+        await _show_section(callback, "<b>СБП через ЮKassa</b>\n\nВыберите срок подписки.", sbp_plans_menu(config.sbp_plans))
 
     @router.callback_query(F.data.startswith("sbp:create:"))
     async def sbp_create_handler(callback: CallbackQuery) -> None:
@@ -396,23 +543,16 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
             plan = _find_plan(config.sbp_plans, code)
             order = await yookassa.create_sbp_payment(user, plan)
         except (RuntimeError, YookassaError) as exc:
-            await _show_section(
-                callback,
-                (
-                    "<b>СБП через ЮKassa</b>\n\n"
-                    "Не удалось создать платёж. Попробуйте ещё раз чуть позже."
-                ),
-                sbp_plans_menu(config.sbp_plans),
-            )
             await callback.answer("Платёж не создан.", show_alert=True)
+            await _show_section(callback, "<b>СБП через ЮKassa</b>\n\nНе удалось создать платёж. Попробуйте ещё раз чуть позже.", sbp_plans_menu(config.sbp_plans))
             await _notify_admins(callback.message.bot, config, f"YooKassa create payment error for {user.telegram_id}: {exc}")
             return
         if not order.confirmation_url:
             await callback.answer("ЮKassa не вернула ссылку оплаты.", show_alert=True)
             return
 
-        await _show_section(callback, _sbp_order_text(order, config), sbp_payment_menu(order.id, order.confirmation_url))
         await callback.answer()
+        await _show_section(callback, _sbp_order_text(order, config), sbp_payment_menu(order.id, order.confirmation_url))
 
     @router.callback_query(F.data.startswith("sbp:check:"))
     async def sbp_check_handler(callback: CallbackQuery) -> None:
@@ -424,7 +564,7 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
             order_id = int(callback.data.split(":", 2)[2])
             result = await yookassa.check_order(order_id)
         except (ValueError, LookupError):
-            await callback.answer("Неизвестный тариф.", show_alert=True)
+            await callback.answer("Неизвестный платёж.", show_alert=True)
             return
         except YookassaVerificationError as exc:
             await callback.answer("Платёж не прошёл проверку.", show_alert=True)
@@ -439,32 +579,23 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
             await callback.answer("Оплата ещё не подтверждена.", show_alert=True)
             return
         if result.status == "canceled":
-            await _show_section(
-                callback,
-                "<b>Платёж отменён</b>\n\nСоздайте новый платёж и попробуйте снова.",
-                sbp_plans_menu(config.sbp_plans),
-            )
             await callback.answer()
+            await _show_section(callback, "<b>Платёж отменён</b>\n\nСоздайте новый платёж и попробуйте снова.", sbp_plans_menu(config.sbp_plans))
             return
         if result.status != "succeeded" or result.finalization is None:
             await callback.answer("Платёж пока не подтверждён.", show_alert=True)
             return
 
         if not result.finalization.already_processed:
-            await _after_successful_external_payment(
-                callback.message.bot,
-                config,
-                db,
-                xui,
-                yookassa,
-                result.finalization,
-            )
+            await _after_successful_external_payment(callback.message.bot, config, db, xui, yookassa, result.finalization)
+        await callback.answer()
         await _show_section(
             callback,
-            "Оплата подтверждена. Подписка ANDREVPN продлена.\n\n" + cabinet(result.finalization.user),
-            main_menu(_is_admin(callback.from_user.id, config)),
+            "✅ <b>Оплата подтверждена</b>\n\n"
+            "Подписка ANDREVPN продлена.\n\n"
+            f"Активна до: <b>{format_date(result.finalization.user.subscription_until)}</b>",
+            success_menu(),
         )
-        await callback.answer()
 
     @router.callback_query(F.data.startswith("pay:"))
     async def pay_handler(callback: CallbackQuery) -> None:
@@ -473,13 +604,14 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
 
         is_stars_payment = config.payment_currency.upper() == "XTR"
         if not is_stars_payment and not config.payment_provider_token:
-            text = (
+            await callback.answer()
+            await _show_section(
+                callback,
                 "<b>Оплата пока не подключена</b>\n\n"
                 "Тариф выбран, но платёжный токен ещё не указан в настройках бота. "
-                "Напишите администратору для ручного продления."
+                "Напишите администратору для ручного продления.",
+                back_menu("plans:stars"),
             )
-            await _show_section(callback, text, back_menu())
-            await callback.answer()
             await _notify_admins(callback.message.bot, config, f"User {user.telegram_id} wants to pay for {plan.title}")
             return
 
@@ -529,7 +661,7 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
             await _notify_admins(message.bot, config, f"Paid user {user.telegram_id}, but 3X-UI failed: {exc}")
             await message.answer(
                 "Оплата прошла, подписка продлена. Подключение создаётся вручную администратором.",
-                reply_markup=main_menu(_is_admin(user.telegram_id, config)),
+                reply_markup=main_reply_keyboard(_is_admin(user.telegram_id, config)),
             )
             return
 
@@ -537,8 +669,9 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
             await _notify_referral_grant(message.bot, result.referral_grant, "payment")
 
         await message.answer(
-            "Оплата прошла успешно. Подписка ANDREVPN продлена.\n\n" + cabinet(updated_user),
-            reply_markup=main_menu(_is_admin(user.telegram_id, config)),
+            "✅ <b>Оплата прошла успешно</b>\n\n"
+            f"Подписка ANDREVPN продлена до: <b>{format_date(updated_user.subscription_until)}</b>",
+            reply_markup=success_menu(),
         )
         await _notify_admins(
             message.bot,
@@ -546,7 +679,7 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
             (
                 "<b>Продление подписки</b>\n"
                 f"ID: <code>{user.telegram_id}</code>\n"
-                f"Тариф: {plan.title}\n"
+                f"Тариф: {escape(plan.title)}\n"
                 f"Сумма: {message.successful_payment.total_amount} {message.successful_payment.currency}\n"
                 f"Активна до: <b>{format_dt(updated_user.subscription_until)}</b>"
             ),
@@ -555,7 +688,7 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
     @router.message(
         lambda message: message.from_user is not None
         and message.from_user.id in support_waiting
-        and message.from_user.id not in admin_add_waiting
+        and (message.text is None or message.text not in MAIN_REPLY_BUTTONS | {BTN_CANCEL_SUPPORT})
     )
     async def support_message_handler(message: Message) -> None:
         if message.from_user is None:
@@ -566,60 +699,56 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         await message.answer(
             (
                 "Сообщение отправлено в поддержку.\n\n"
-                "Если нужно, отправьте еще один скриншот или дополнительный текст. "
-                "Чтобы выйти, нажмите кнопку ниже."
+                "Можно отправить еще один скриншот или дополнительный текст. "
+                "Чтобы выйти, нажмите кнопку отмены."
             ),
-            reply_markup=support_menu(),
+            reply_markup=support_cancel_keyboard(),
         )
 
     @router.message(F.text)
     async def admin_text_handler(message: Message) -> None:
-        if message.from_user is None or not _is_admin(message.from_user.id, config):
-            return
-        if message.from_user.id not in admin_add_waiting:
+        if message.from_user is None:
             return
 
-        try:
-            telegram_id, days = _parse_admin_add_request(message.text or "")
-        except ValueError:
+        state = admin_grants.get(message.from_user.id)
+        if state is None:
             await message.answer(
-                "Не понял формат. Отправьте так:\n<code>443060337 30</code>",
-                reply_markup=admin_back_menu(),
+                "Я не понял сообщение. Пожалуйста, выберите нужный раздел в меню под полем ввода.",
+                reply_markup=main_reply_keyboard(_is_admin(message.from_user.id, config)),
             )
             return
 
-        user = db.get_or_create_user(telegram_id)
-        updated_user = db.extend_subscription(user.telegram_id, days)
-        try:
-            await xui.provision_user(db, updated_user)
-            updated_user = db.get_user(user.telegram_id)
-        except XuiError as exc:
+        if not _is_admin(message.from_user.id, config):
+            admin_grants.pop(message.from_user.id, None)
+            await message.answer("Нет доступа.")
+            return
+
+        if state.step == "await_id":
+            try:
+                target_id = _parse_positive_int(message.text or "", max_value=10**12)
+            except ValueError:
+                await message.answer("Отправьте только Telegram ID пользователя числом.", reply_markup=admin_back_menu())
+                return
+            state.target_id = target_id
+            state.step = "await_days_choice"
             await message.answer(
-                f"Подписка продлена, но подключение в 3X-UI не создалось:\n<code>{exc}</code>",
-                reply_markup=admin_back_menu(),
+                f"ID: <code>{target_id}</code>\n\nВыберите срок подписки.",
+                reply_markup=admin_grant_days_menu(),
             )
             return
 
-        admin_add_waiting.discard(message.from_user.id)
-        await message.answer(
-            (
-                "<b>Подписка добавлена</b>\n\n"
-                f"ID: <code>{updated_user.telegram_id}</code>\n"
-                f"Срок: {days} дней\n"
-                f"{cabinet(updated_user)}"
-            ),
-            reply_markup=admin_back_menu(),
-        )
-        await _notify_user_about_admin_subscription(message.bot, updated_user, days)
-        await _notify_admins(
-            message.bot,
-            config,
-            (
-                "<b>Ручная выдача подписки</b>\n"
-                f"ID: <code>{updated_user.telegram_id}</code>\n"
-                f"Срок: {days} дней"
-            ),
-        )
+        if state.step == "await_days":
+            try:
+                days = _parse_positive_int(message.text or "", max_value=MAX_ADMIN_GRANT_DAYS)
+            except ValueError:
+                await message.answer(f"Отправьте целое число дней от 1 до {MAX_ADMIN_GRANT_DAYS}.", reply_markup=admin_back_menu())
+                return
+            state.days = days
+            state.step = "confirm"
+            await _show_admin_grant_confirmation_message(message, db, state)
+            return
+
+        await message.answer("Выберите действие кнопками ниже.", reply_markup=admin_back_menu())
 
     return router
 
@@ -630,6 +759,10 @@ def _touch_user(callback: CallbackQuery, db: Database):
     return db.upsert_user(callback.from_user.id, callback.from_user.username, callback.from_user.first_name)
 
 
+def _message_is_admin(message: Message, config: Config) -> bool:
+    return message.from_user is not None and _is_admin(message.from_user.id, config)
+
+
 def _start_argument(text: str | None) -> str | None:
     if not text:
         return None
@@ -637,21 +770,88 @@ def _start_argument(text: str | None) -> str | None:
     return parts[1].strip() if len(parts) == 2 else None
 
 
+def _trial_available(user) -> bool:
+    return user.trial_used_at is None and not user.is_active
+
+
+async def _notify_new_user(message: Message, config: Config) -> None:
+    username = f"@{message.from_user.username}" if message.from_user and message.from_user.username else "нет"
+    await _notify_admins(
+        message.bot,
+        config,
+        f"<b>Новый клиент</b>\nID: <code>{message.from_user.id}</code>\nUsername: {username}",
+    )
+
+
+async def _send_start_home(message: Message, config: Config, user) -> None:
+    text = welcome(config) + "\n\n" + home_card(user, config)
+    keyboard = home_actions_menu(is_active=user.is_active, trial_available=_trial_available(user))
+    if WELCOME_IMAGE_PATH.exists():
+        await message.answer_photo(FSInputFile(WELCOME_IMAGE_PATH), caption=text, reply_markup=keyboard)
+        return
+    await message.answer(text, reply_markup=keyboard)
+
+
+async def _show_connection_from_callback(callback: CallbackQuery, user, config: Config, db: Database, xui: XuiApi) -> None:
+    if user.is_active:
+        try:
+            await xui.provision_user(db, user)
+            user = db.get_user(user.telegram_id)
+        except XuiError as exc:
+            await callback.answer("Не удалось создать подключение, администратор уже получил ошибку.", show_alert=True)
+            await _notify_admins(callback.message.bot, config, f"3X-UI error for {user.telegram_id}: {exc}")
+            return
+
+    link = connection_link(user, config)
+    if user.is_active:
+        await _show_section(callback, connection_text(user, config), connection_menu(link, can_copy=True))
+        return
+    await _show_section(callback, connection_text(user, config), inactive_connection_menu(trial_available=_trial_available(user)))
+
+
+async def _send_connection_from_message(message: Message, user, config: Config, db: Database, xui: XuiApi) -> None:
+    if user.is_active:
+        try:
+            await xui.provision_user(db, user)
+            user = db.get_user(user.telegram_id)
+        except XuiError as exc:
+            await message.answer("Не удалось создать подключение, администратор уже получил ошибку.")
+            await _notify_admins(message.bot, config, f"3X-UI error for {user.telegram_id}: {exc}")
+            return
+
+    link = connection_link(user, config)
+    keyboard = connection_menu(link, can_copy=True) if user.is_active else inactive_connection_menu(trial_available=_trial_available(user))
+    await message.answer(connection_text(user, config), reply_markup=keyboard)
+
+
+async def _send_referrals_from_message(message: Message, referrals: ReferralService, user, *, callback: CallbackQuery | None = None) -> None:
+    bot_info = await message.bot.get_me()
+    if not bot_info.username:
+        if callback:
+            await callback.answer("Не удалось получить имя бота.", show_alert=True)
+        else:
+            await message.answer("Не удалось получить имя бота.")
+        return
+    link = referrals.referral_link(user, bot_info.username)
+    text = _referral_program_text(user, link, referrals.stats(user))
+    if callback:
+        await _show_section(callback, text, referrals_menu(link))
+        return
+    await message.answer(text, reply_markup=referrals_menu(link))
+
+
 def _referral_program_text(user, referral_link: str, stats: dict[str, int]) -> str:
     referrer = f"<code>{user.referred_by}</code>" if user.referred_by else "нет"
     return (
-        "<b>Реферальная программа</b>\n\n"
-        "Приглашайте друзей и получайте бонусные дни к VPN:\n\n"
-        "Друг запустил пробный период - <b>+3 дня</b>\n"
-        "Друг купил 1 месяц - <b>+7 дней</b>\n"
-        "Друг купил 2 месяца - <b>+14 дней</b>\n"
-        "Друг купил 3 месяца - <b>+21 день</b>\n\n"
-        "Ваша ссылка:\n"
-        f"<code>{referral_link}</code>\n\n"
-        f"Приглашено пользователей: <b>{stats['invited_users']}</b>\n"
-        f"Начислено бонусных дней: <b>{stats['reward_days']}</b>\n"
-        f"Бонусов за пробный период: <b>{stats['trial_rewards']}</b>\n"
-        f"Бонусов за оплаты: <b>{stats['payment_rewards']}</b>\n\n"
+        "🎁 <b>Пригласить друга</b>\n\n"
+        "Бонусы за приглашения:\n"
+        "Пробный период друга - <b>+3 дня</b>\n"
+        "Оплата 1 месяца - <b>+7 дней</b>\n"
+        "Оплата 2 месяцев - <b>+14 дней</b>\n"
+        "Оплата 3 месяцев - <b>+21 день</b>\n\n"
+        f"Ваша ссылка:\n<code>{escape(referral_link)}</code>\n\n"
+        f"Приглашено: <b>{stats['invited_users']}</b>\n"
+        f"Начислено дней: <b>{stats['reward_days']}</b>\n"
         f"Вас пригласил: {referrer}"
     )
 
@@ -663,9 +863,9 @@ def _sbp_order_text(order, config: Config) -> str:
         title = order.plan_code
     return (
         "<b>СБП через ЮKassa</b>\n\n"
-        f"Тариф: <b>{title}</b>\n"
+        f"Тариф: <b>{escape(title)}</b>\n"
         f"Сумма: <b>{_format_rub_kopecks(order.amount_kopecks)}</b>\n\n"
-        "Нажмите кнопку <b>Оплатить через СБП</b>. После оплаты вернитесь в Telegram "
+        "Нажмите <b>Перейти к оплате</b>. После оплаты вернитесь в Telegram "
         "и нажмите <b>Проверить оплату</b>."
     )
 
@@ -688,8 +888,9 @@ async def _after_successful_external_payment(
     try:
         await bot.send_message(
             updated_user.telegram_id,
-            "Оплата через СБП прошла успешно. Подписка ANDREVPN продлена.\n\n" + cabinet(updated_user),
-            reply_markup=main_menu(_is_admin(updated_user.telegram_id, config)),
+            "✅ <b>Оплата через СБП прошла успешно</b>\n\n"
+            f"Подписка ANDREVPN продлена до: <b>{format_date(updated_user.subscription_until)}</b>",
+            reply_markup=success_menu(),
         )
     except Exception:
         pass
@@ -704,7 +905,7 @@ async def _after_successful_external_payment(
         (
             "<b>Оплата через СБП</b>\n"
             f"ID: <code>{updated_user.telegram_id}</code>\n"
-            f"Тариф: {finalization.order.plan_code}\n"
+            f"Тариф: {escape(finalization.order.plan_code)}\n"
             f"Сумма: {_format_rub_kopecks(finalization.order.amount_kopecks)}\n"
             f"Активна до: <b>{format_dt(updated_user.subscription_until)}</b>"
         ),
@@ -722,47 +923,114 @@ async def _show_section(callback: CallbackQuery, text: str, reply_markup) -> Non
     if callback.message is None:
         return
     if callback.message.photo:
-        await callback.message.edit_caption(caption=text, reply_markup=reply_markup)
+        await _safe_edit_reply_markup(callback.message, None)
+        await callback.message.answer(text, reply_markup=reply_markup)
         return
-    await callback.message.edit_text(text, reply_markup=reply_markup)
+    try:
+        await callback.message.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest:
+        await callback.message.answer(text, reply_markup=reply_markup)
 
 
-async def _send_home(message: Message, config: Config, user_id: int | None = None) -> None:
-    keyboard = main_menu(_is_admin(user_id, config))
-    if WELCOME_IMAGE_PATH.exists():
-        await message.answer_photo(
-            FSInputFile(WELCOME_IMAGE_PATH),
-            caption=welcome(config),
-            reply_markup=keyboard,
-        )
+async def _safe_edit_reply_markup(message: Message, reply_markup) -> None:
+    try:
+        await message.edit_reply_markup(reply_markup=reply_markup)
+    except TelegramBadRequest:
+        pass
+
+
+async def _show_instruction_step(callback: CallbackQuery, key: str, index: int, steps, link: str | None) -> None:
+    if callback.message is None:
         return
-    await message.answer(welcome(config), reply_markup=keyboard)
+    caption, image_path = steps[index]
+    numbered_caption = f"{index + 1}. {caption}" if len(steps) > 1 else caption
+    keyboard = instruction_step_menu(key=key, index=index, total=len(steps), link=link)
 
-
-async def _send_happ_instruction(message: Message, steps=HAPP_STEPS) -> None:
-    for index, (caption, image_path) in enumerate(steps):
-        reply_markup = instruction_done_menu() if index == len(steps) - 1 else None
-        if image_path.exists():
-            await message.answer_photo(FSInputFile(image_path), caption=caption, reply_markup=reply_markup)
-        else:
-            await message.answer(caption, reply_markup=reply_markup)
-
-
-async def _send_appstore_instruction(message: Message) -> None:
-    for index, (caption, image_path) in enumerate(APPSTORE_STEPS):
-        reply_markup = instruction_done_menu() if index == len(APPSTORE_STEPS) - 1 else None
-        if image_path and image_path.exists():
-            await message.answer_photo(FSInputFile(image_path), caption=caption, reply_markup=reply_markup)
-        else:
-            await message.answer(caption, reply_markup=reply_markup)
-
-
-async def _send_googleplay_instruction(message: Message) -> None:
-    caption, image_path = GOOGLEPLAY_HAPP_STEP
-    if image_path.exists():
-        await message.answer_photo(FSInputFile(image_path), caption=caption, reply_markup=instruction_done_menu())
+    if image_path and image_path.exists():
+        media = InputMediaPhoto(media=FSInputFile(image_path), caption=numbered_caption)
+        if callback.message.photo:
+            try:
+                await callback.message.edit_media(media=media, reply_markup=keyboard)
+                return
+            except TelegramBadRequest:
+                pass
+        await _replace_with_photo(callback.message, image_path, numbered_caption, keyboard)
         return
-    await message.answer(caption, reply_markup=instruction_done_menu())
+
+    if callback.message.photo:
+        await _replace_with_text(callback.message, numbered_caption, keyboard)
+        return
+    try:
+        await callback.message.edit_text(numbered_caption, reply_markup=keyboard)
+    except TelegramBadRequest:
+        await callback.message.answer(numbered_caption, reply_markup=keyboard)
+
+
+async def _replace_with_photo(message: Message, image_path: Path, caption: str, reply_markup) -> None:
+    try:
+        await message.delete()
+    except TelegramBadRequest:
+        await _safe_edit_reply_markup(message, None)
+    await message.answer_photo(FSInputFile(image_path), caption=caption, reply_markup=reply_markup)
+
+
+async def _replace_with_text(message: Message, text: str, reply_markup) -> None:
+    try:
+        await message.delete()
+    except TelegramBadRequest:
+        await _safe_edit_reply_markup(message, None)
+    await message.answer(text, reply_markup=reply_markup)
+
+
+async def _show_admin_grant_confirmation(callback: CallbackQuery, db: Database, state: AdminGrantState) -> None:
+    text = _admin_grant_confirmation_text(db, state)
+    await _show_section(callback, text, admin_grant_confirm_menu())
+
+
+async def _show_admin_grant_confirmation_message(message: Message, db: Database, state: AdminGrantState) -> None:
+    await message.answer(_admin_grant_confirmation_text(db, state), reply_markup=admin_grant_confirm_menu())
+
+
+def _admin_grant_confirmation_text(db: Database, state: AdminGrantState) -> str:
+    if state.target_id is None or state.days is None:
+        return "Недостаточно данных для подтверждения."
+    try:
+        user = db.get_user(state.target_id)
+        base = user.subscription_until if user.subscription_until and user.subscription_until > datetime.now(UTC) else datetime.now(UTC)
+    except LookupError:
+        base = datetime.now(UTC)
+    until = base + timedelta(days=state.days)
+    return (
+        "➕ <b>Подтвердите выдачу подписки</b>\n\n"
+        f"ID: <code>{state.target_id}</code>\n"
+        f"Срок: <b>{state.days} дней</b>\n"
+        f"Будет активна до: <b>{format_date(until)}</b>"
+    )
+
+
+def _support_hint_text(action: str) -> str:
+    hints = {
+        "payment": (
+            "💳 <b>Проблема с оплатой</b>\n\n"
+            "Если платили через СБП, вернитесь в экран оплаты и нажмите <b>Проверить оплату</b>. "
+            "Если подписка не продлилась, напишите оператору и приложите скриншот оплаты."
+        ),
+        "vpn": (
+            "🔗 <b>Не подключается VPN</b>\n\n"
+            "Проверьте, что подписка активна, обновите подписку в HAPP через вашу персональную ссылку "
+            "и попробуйте другой доступный профиль."
+        ),
+        "speed": (
+            "🐢 <b>Низкая скорость</b>\n\n"
+            "Обновите подписку в HAPP и выберите другой доступный профиль ANDREVPN. "
+            "Если не помогло, напишите оператору."
+        ),
+        "happ": (
+            "📱 <b>Проблема с HAPP</b>\n\n"
+            "Откройте раздел <b>Инструкция</b>, выберите вашу ОС и проверьте шаг подключения через «Из буфера»."
+        ),
+    }
+    return hints.get(action, "Опишите вопрос оператору.")
 
 
 def _find_plan(plans: list[Plan], code: str) -> Plan:
@@ -787,7 +1055,7 @@ def _admin_stats_text(db: Database, config: Config) -> str:
     xtr_amount = amounts.get("XTR", 0)
     rub_amount = amounts.get("RUB", 0)
     return (
-        "<b>Статистика ANDREVPN</b>\n\n"
+        "📊 <b>Статистика ANDREVPN</b>\n\n"
         f"Всего пользователей: <b>{stats['total_users']}</b>\n"
         f"Активных подписок: <b>{stats['active_users']}</b>\n"
         f"Пробных пользователей: <b>{stats['trial_users']}</b>\n"
@@ -800,15 +1068,11 @@ def _admin_stats_text(db: Database, config: Config) -> str:
     )
 
 
-def _parse_admin_add_request(text: str) -> tuple[int, int]:
-    parts = text.replace(",", " ").split()
-    if len(parts) != 2:
-        raise ValueError("Expected telegram_id and days")
-    telegram_id = int(parts[0])
-    days = int(parts[1])
-    if telegram_id <= 0 or days <= 0 or days > 3660:
-        raise ValueError("Invalid telegram_id or days")
-    return telegram_id, days
+def _parse_positive_int(text: str, *, max_value: int) -> int:
+    value = int(text.strip())
+    if value <= 0 or value > max_value:
+        raise ValueError("out of range")
+    return value
 
 
 def _server_status_text() -> str:
@@ -821,7 +1085,7 @@ def _server_status_text() -> str:
 
     disk_used = disk.total - disk.free
     return (
-        "<b>Сервер ANDREVPN</b>\n\n"
+        "🖥 <b>Сервер ANDREVPN</b>\n\n"
         f"CPU load: <b>{load}</b>\n"
         f"RAM: <b>{_format_bytes(ram[0])} / {_format_bytes(ram[1])}</b> ({ram[2]}%)\n"
         f"Диск: <b>{_format_bytes(disk_used)} / {_format_bytes(disk.total)}</b> ({round(disk_used / disk.total * 100)}%)\n"
@@ -900,9 +1164,9 @@ async def _notify_user_about_admin_subscription(bot, user, days: int) -> None:
                 "<b>Подписка ANDREVPN активирована</b>\n\n"
                 f"Доступ выдан на {days} дней.\n"
                 f"Активна до: <b>{format_dt(user.subscription_until)}</b>\n\n"
-                "Откройте раздел <b>Получить подключение</b>, чтобы скопировать ссылку."
+                "Откройте раздел <b>Подключить VPN</b>, чтобы скопировать ссылку."
             ),
-            reply_markup=main_menu(False),
+            reply_markup=success_menu(),
         )
     except Exception:
         pass
@@ -931,8 +1195,8 @@ async def _notify_support_message(message: Message, config: Config, user) -> Non
     header = (
         "<b>Новый вопрос в поддержку</b>\n\n"
         f"ID: <code>{user.telegram_id}</code>\n"
-        f"Username: {username}\n"
-        f"Имя: {name}"
+        f"Username: {escape(username)}\n"
+        f"Имя: {escape(name)}"
     )
     for admin_id in config.admin_ids:
         try:

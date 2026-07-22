@@ -7,6 +7,7 @@ import ssl
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import BotCommand
 from aiohttp import web
 
 from .config import load_config
@@ -27,6 +28,16 @@ async def run() -> None:
     db.init()
 
     bot = Bot(config.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    await bot.set_my_commands(
+        [
+            BotCommand(command="start", description="главное меню"),
+            BotCommand(command="help", description="краткая навигация"),
+            BotCommand(command="cancel", description="отменить текущий ввод"),
+            BotCommand(command="profile", description="моя подписка"),
+            BotCommand(command="connect", description="получить подключение"),
+            BotCommand(command="pay", description="оплата"),
+        ]
+    )
     xui = XuiApi(config)
     dispatcher = Dispatcher()
     dispatcher.include_router(build_router(config, db, xui))

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, datetime
+from html import escape
+from math import ceil
 from urllib.parse import quote
 
 from .config import Config, VpnProfile
@@ -9,104 +11,113 @@ from .db import User
 
 def welcome(config: Config) -> str:
     return (
-        f"<b>{config.brand_name}</b>\n\n"
+        f"<b>{escape(config.brand_name)}</b>\n\n"
         "Добро пожаловать в ANDREVPN.\n\n"
-        "Это VPN-сервис для стабильного и приватного подключения к интернету. "
-        "Здесь можно посмотреть срок подписки, продлить доступ, получить ссылку подключения "
-        "и открыть инструкцию для приложения HAPP.\n\n"
-        "Выберите нужный раздел ниже."
+        "VPN-сервис для стабильного и приватного подключения. "
+        "В меню ниже можно проверить подписку, оплатить доступ, получить подключение и открыть инструкцию."
+    )
+
+
+def home_card(user: User, config: Config) -> str:
+    if user.is_active and user.subscription_until is not None:
+        return (
+            f"🟢 <b>{escape(config.brand_name)} активен</b>\n"
+            f"До: <b>{format_date(user.subscription_until)}</b>\n"
+            f"Осталось: <b>{remaining_days_text(user.subscription_until)}</b>"
+        )
+    return (
+        "🔴 <b>Подписка не активна</b>\n"
+        "Выберите пробный период или тариф."
+    )
+
+
+def profile_card(user: User) -> str:
+    if user.subscription_until is None:
+        status = "🔴 Не активна"
+        until = "нет"
+        days_line = ""
+    elif user.is_active:
+        status = "🟢 Активна"
+        until = format_date(user.subscription_until)
+        days_line = f"\nОсталось: <b>{remaining_days_text(user.subscription_until)}</b>"
+    else:
+        status = "🔴 Закончилась"
+        until = format_date(user.subscription_until)
+        days_line = ""
+
+    return (
+        "👤 <b>Моя подписка</b>\n\n"
+        f"Статус: <b>{status}</b>\n"
+        f"Дата окончания: <b>{until}</b>{days_line}\n\n"
+        f"Telegram ID: <code>{user.telegram_id}</code>"
     )
 
 
 def cabinet(user: User) -> str:
-    if user.subscription_until is None:
-        status = "Подписка пока не активна."
-    elif user.is_active:
-        status = f"Подписка активна до: <b>{format_dt(user.subscription_until)}</b>"
-    else:
-        status = f"Подписка закончилась: <b>{format_dt(user.subscription_until)}</b>"
+    return profile_card(user)
 
-    return (
-        "<b>Личный кабинет</b>\n\n"
-        f"Telegram ID: <code>{user.telegram_id}</code>\n"
-        f"{status}"
-    )
+
+def connection_text(user: User, config: Config) -> str:
+    if not user.is_active:
+        return (
+            "🔗 <b>Подключение ANDREVPN</b>\n\n"
+            "Сначала активируйте подписку. После этого здесь появится персональная ссылка для HAPP."
+        )
+
+    link = connection_link(user, config)
+    if link:
+        return (
+            "🔗 <b>Подключение ANDREVPN</b>\n\n"
+            "Скопируйте персональную ссылку и добавьте ее в HAPP через «Из буфера».\n\n"
+            f"<code>{escape(link)}</code>"
+        )
+
+    if not user.xui_sub_id:
+        support = f" @{escape(config.support_username)}" if config.support_username else ""
+        return (
+            "🔗 <b>Подключение ANDREVPN</b>\n\n"
+            "Подписка активна, но ссылка подключения еще не сформирована. "
+            f"Напишите администратору{support}."
+        )
+
+    return "🔗 <b>Подключение ANDREVPN</b>\n\nНастройки подключения еще не заполнены администратором."
 
 
 def happ_instruction(config: Config) -> str:
     return (
         "<b>Инструкция для HAPP</b>\n\n"
         "1. Установите приложение HAPP на телефон.\n"
-        "2. В боте откройте раздел <b>Получить подключение</b> и скопируйте персональную ссылку.\n"
-        "3. В HAPP нажмите добавление подписки или профиля.\n"
-        "4. Вставьте ссылку, сохраните профиль и обновите подписку.\n"
-        "5. Выберите добавленный профиль ANDREVPN и нажмите подключение.\n\n"
-        "Если после обновления подписки появилось несколько вариантов ANDREVPN, выберите любой доступный "
-        "профиль. Если один вариант работает нестабильно, переключитесь на другой."
+        "2. В боте откройте раздел <b>Подключить VPN</b> и скопируйте персональную ссылку.\n"
+        "3. В HAPP нажмите <b>Из буфера</b> и разрешите вставку.\n"
+        "4. Обновите подписку и выберите любой доступный профиль ANDREVPN."
     )
-
-
-def connection_text(user: User, config: Config) -> str:
-    if not user.is_active:
-        return (
-            "<b>Подключение ANDREVPN</b>\n\n"
-            "Сначала оплатите или продлите подписку. После активации здесь появится персональная ссылка."
-        )
-
-    if user.xui_sub_id and config.vpn_subscription_base_url:
-        return (
-            "<b>Подключение ANDREVPN</b>\n\n"
-            "Персональная ссылка для подключения отправлена отдельным сообщением ниже.\n\n"
-            "Внутри подписки может быть несколько вариантов подключения.\n\n"
-            "Скопируйте данную ссылку, зайдите в приложение Happ - Proxy Utility "
-            "и выберите внизу слева \"Из буфера\"."
-        )
-
-    direct_link = build_vless_reality_link(user, config)
-    if direct_link:
-        return (
-            "<b>Подключение ANDREVPN</b>\n\n"
-            "Персональная ссылка для подключения отправлена отдельным сообщением ниже.\n\n"
-            "Скопируйте данную ссылку, зайдите в приложение Happ - Proxy Utility "
-            "и выберите внизу слева \"Из буфера\"."
-        )
-
-    if not user.xui_sub_id:
-        support = f" @{config.support_username}" if config.support_username else ""
-        return (
-            "<b>Подключение ANDREVPN</b>\n\n"
-            "Подписка активна, но ссылка подключения ещё не сформирована. "
-            f"Напишите администратору{support}."
-        )
-
-    return "<b>Подключение ANDREVPN</b>\n\nНастройки подключения ещё не заполнены администратором."
 
 
 def trial_text(user: User) -> str:
     if user.trial_used_at is not None:
         return (
-            "<b>Пробная версия ANDREVPN</b>\n\n"
+            "🎁 <b>Пробный период</b>\n\n"
             "Пробный период уже был активирован ранее. Он доступен только один раз."
         )
     if user.is_active:
         return (
-            "<b>Пробная версия ANDREVPN</b>\n\n"
+            "🎁 <b>Пробный период</b>\n\n"
             "У вас уже есть активная подписка. Пробный период доступен только новым пользователям без активной подписки."
         )
     return (
-        "<b>Пробная версия ANDREVPN</b>\n\n"
-        "Вы можете получить пробный период на <b>3 дня</b>. "
-        "После активации подключение появится в разделе <b>Получить подключение</b>.\n\n"
-        "Пробный период доступен только один раз."
+        "🎁 <b>Пробный период</b>\n\n"
+        "Можно получить ANDREVPN на <b>3 дня</b>. "
+        "После активации ссылка появится в разделе <b>Подключить VPN</b>.\n\n"
+        "Пробный период доступен один раз."
     )
 
 
 def trial_success_text(user: User) -> str:
-    until = format_dt(user.subscription_until) if user.subscription_until else ""
+    until = format_date(user.subscription_until) if user.subscription_until else ""
     return (
-        "<b>Пробная подписка активирована</b>\n\n"
+        "✅ <b>Пробная подписка активирована</b>\n\n"
         f"Доступ ANDREVPN выдан на 3 дня, до: <b>{until}</b>.\n\n"
-        "Подключение уже находится в разделе <b>Получить подключение</b>."
+        "Подключение уже находится в разделе <b>Подключить VPN</b>."
     )
 
 
@@ -114,8 +125,7 @@ def connection_link_message(user: User, config: Config) -> str:
     link = connection_link(user, config)
     if not link:
         return ""
-
-    return f"<code>{link}</code>"
+    return f"<code>{escape(link)}</code>"
 
 
 def connection_link(user: User, config: Config) -> str:
@@ -182,3 +192,24 @@ def build_vless_profile_link(user: User, profile: VpnProfile) -> str:
 def format_dt(value) -> str:
     local = value.astimezone(UTC)
     return local.strftime("%d.%m.%Y %H:%M UTC")
+
+
+def format_date(value) -> str:
+    local = value.astimezone(UTC)
+    return local.strftime("%d.%m.%Y")
+
+
+def remaining_days_text(until: datetime) -> str:
+    seconds = max(0, (until.astimezone(UTC) - datetime.now(UTC)).total_seconds())
+    days = max(1, ceil(seconds / 86400)) if seconds > 0 else 0
+    return _plural_days(days)
+
+
+def _plural_days(days: int) -> str:
+    if days % 10 == 1 and days % 100 != 11:
+        word = "день"
+    elif days % 10 in {2, 3, 4} and days % 100 not in {12, 13, 14}:
+        word = "дня"
+    else:
+        word = "дней"
+    return f"{days} {word}"
