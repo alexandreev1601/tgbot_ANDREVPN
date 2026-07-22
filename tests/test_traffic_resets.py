@@ -41,6 +41,7 @@ def config(**kwargs):
         "admin_ids": {1738661194},
         "xui_db_path": Path("missing.sqlite3"),
         "xui_total_gb": 107374182400,
+        "xui_inbound_id": None,
         "xui_limit_ip": 0,
         "xui_base_url": "",
         "xui_api_token": "",
@@ -125,6 +126,34 @@ class TrafficResetTest(unittest.IsolatedAsyncioTestCase):
         inbound = conn.execute("SELECT settings FROM inbounds WHERE id = 4").fetchone()
         self.assertIn('"enable":true', inbound["settings"])
         conn.close()
+
+    def test_xui_traffic_summary_sums_usage_and_monthly_remaining(self) -> None:
+        xui_db = Path(self.tmpdir.name) / "x-ui.sqlite3"
+        self.create_xui_db(xui_db)
+        user = self.active_user()
+        total = 100 * 1024 ** 3
+        conn = sqlite3.connect(xui_db)
+        conn.execute(
+            """
+            INSERT INTO client_traffics (
+                inbound_id, enable, email, up, down, expiry_time, total, reset, last_online
+            )
+            VALUES (5, 1, 'tg_1001', ?, ?, 0, ?, 0, 0)
+            """,
+            (2 * 1024 ** 3, 3 * 1024 ** 3, total),
+        )
+        conn.commit()
+        conn.close()
+
+        xui = XuiApi(config(xui_db_path=xui_db, xui_total_gb=total))
+        summary = xui.traffic_summary(user)
+
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary.used_bytes, 123 + 456 + 5 * 1024 ** 3)
+        self.assertEqual(summary.total_bytes, total)
+        self.assertEqual(summary.remaining_bytes, total - summary.used_bytes)
+        self.assertEqual(summary.next_reset_at.day, 1)
+        self.assertEqual(summary.profiles_count, 2)
 
     def test_migration_is_idempotent(self) -> None:
         self.active_user()

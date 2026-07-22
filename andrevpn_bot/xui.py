@@ -22,6 +22,15 @@ class XuiClient:
     flow: str
 
 
+@dataclass(frozen=True)
+class TrafficSummary:
+    used_bytes: int
+    total_bytes: int
+    remaining_bytes: int
+    next_reset_at: datetime
+    profiles_count: int
+
+
 class XuiError(RuntimeError):
     pass
 
@@ -72,6 +81,56 @@ class XuiApi:
 
     async def resolve_inbound_ids(self) -> list[int]:
         return await self._resolve_inbound_ids()
+
+    def traffic_summary(self, user: User) -> TrafficSummary | None:
+        if not user.xui_email:
+            return None
+        if not self.config.xui_db_path or not self.config.xui_db_path.exists():
+            return None
+
+        inbound_ids = self._configured_inbound_ids()
+        placeholders = ",".join("?" for _ in inbound_ids)
+        params: list[object] = [user.xui_email]
+        inbound_filter = ""
+        if inbound_ids:
+            inbound_filter = f" AND inbound_id IN ({placeholders})"
+            params.extend(inbound_ids)
+
+        conn = sqlite3.connect(self.config.xui_db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT inbound_id, up, down, total
+                FROM client_traffics
+                WHERE email = ?{inbound_filter}
+                """,
+                params,
+            ).fetchall()
+        finally:
+            conn.close()
+
+        if not rows:
+            return None
+
+        used_bytes = sum(max(0, int(row["up"] or 0)) + max(0, int(row["down"] or 0)) for row in rows)
+        row_totals = [int(row["total"] or 0) for row in rows if int(row["total"] or 0) > 0]
+        total_bytes = int(self.config.xui_total_gb or 0) or (max(row_totals) if row_totals else 0)
+        remaining_bytes = max(0, total_bytes - used_bytes) if total_bytes > 0 else 0
+        return TrafficSummary(
+            used_bytes=used_bytes,
+            total_bytes=total_bytes,
+            remaining_bytes=remaining_bytes,
+            next_reset_at=_next_month_start(datetime.now(UTC)),
+            profiles_count=len(rows),
+        )
+
+    def _configured_inbound_ids(self) -> list[int]:
+        if self.config.vpn_profiles:
+            return list(dict.fromkeys(profile.inbound_id for profile in self.config.vpn_profiles))
+        if self.config.xui_inbound_id is not None:
+            return [self.config.xui_inbound_id]
+        return []
 
     @property
     def _is_configured(self) -> bool:
@@ -349,3 +408,10 @@ def _looks_successful(response: httpx.Response) -> bool:
 
 def _new_sub_id() -> str:
     return secrets.token_urlsafe(12).replace("_", "").replace("-", "").lower()
+
+
+def _next_month_start(now: datetime) -> datetime:
+    current = now.astimezone(UTC)
+    if current.month == 12:
+        return current.replace(year=current.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    return current.replace(month=current.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0)

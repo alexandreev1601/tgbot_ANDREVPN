@@ -25,6 +25,7 @@ from andrevpn_bot.keyboards import (
     sbp_plans_menu,
 )
 from andrevpn_bot.texts import home_card, profile_card
+from andrevpn_bot.xui import TrafficSummary
 
 
 class TelegramUxTest(unittest.TestCase):
@@ -78,6 +79,26 @@ class TelegramUxTest(unittest.TestCase):
         self.assertIn("🟢 Активна", profile_card(active))
         self.assertIn("Осталось:", home_card(active, SimpleNamespace(brand_name="ANDREVPN")))
         self.assertIn("🔴 Закончилась", profile_card(expired))
+
+    def test_profile_card_includes_traffic_remaining_and_reset_date(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db = Database(Path(temp_dir) / "bot.sqlite3")
+            db.init()
+            db.upsert_user(1, None, None)
+            user = db.extend_subscription(1, 2)
+
+        traffic = TrafficSummary(
+            used_bytes=25 * 1024 ** 3,
+            total_bytes=100 * 1024 ** 3,
+            remaining_bytes=75 * 1024 ** 3,
+            next_reset_at=datetime(2026, 8, 1, tzinfo=UTC),
+            profiles_count=3,
+        )
+        text = profile_card(user, traffic)
+
+        self.assertIn("Остаток трафика: <b>75 ГБ из 100 ГБ</b>", text)
+        self.assertIn("Использовано: <b>25 ГБ</b>", text)
+        self.assertIn("Сброс трафика: <b>01.08.2026</b>", text)
 
     def test_sbp_plan_labels_are_derived_from_config_with_savings(self) -> None:
         plans = [

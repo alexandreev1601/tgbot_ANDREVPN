@@ -173,7 +173,10 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
         if message.from_user is None:
             return
         user = db.upsert_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
-        await message.answer(profile_card(user), reply_markup=profile_menu(is_active=user.is_active, trial_available=_trial_available(user)))
+        await message.answer(
+            profile_card(user, _traffic_summary(xui, user)),
+            reply_markup=profile_menu(is_active=user.is_active, trial_available=_trial_available(user)),
+        )
 
     @router.message(Command("connect"))
     async def connect_command(message: Message) -> None:
@@ -383,7 +386,11 @@ def build_router(config: Config, db: Database, xui: XuiApi) -> Router:
     async def profile_handler(callback: CallbackQuery) -> None:
         user = _touch_user(callback, db)
         await callback.answer()
-        await _show_section(callback, profile_card(user), profile_menu(is_active=user.is_active, trial_available=_trial_available(user)))
+        await _show_section(
+            callback,
+            profile_card(user, _traffic_summary(xui, user)),
+            profile_menu(is_active=user.is_active, trial_available=_trial_available(user)),
+        )
 
     @router.callback_query(F.data == "referrals")
     async def referrals_handler(callback: CallbackQuery) -> None:
@@ -772,6 +779,13 @@ def _start_argument(text: str | None) -> str | None:
 
 def _trial_available(user) -> bool:
     return user.trial_used_at is None and not user.is_active
+
+
+def _traffic_summary(xui: XuiApi, user):
+    try:
+        return xui.traffic_summary(user)
+    except Exception:
+        return None
 
 
 async def _notify_new_user(message: Message, config: Config) -> None:

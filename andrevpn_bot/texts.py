@@ -7,6 +7,7 @@ from urllib.parse import quote
 
 from .config import Config, VpnProfile
 from .db import User
+from .xui import TrafficSummary
 
 
 def welcome(config: Config) -> str:
@@ -31,7 +32,7 @@ def home_card(user: User, config: Config) -> str:
     )
 
 
-def profile_card(user: User) -> str:
+def profile_card(user: User, traffic: TrafficSummary | None = None) -> str:
     if user.subscription_until is None:
         status = "🔴 Не активна"
         until = "нет"
@@ -45,16 +46,36 @@ def profile_card(user: User) -> str:
         until = format_date(user.subscription_until)
         days_line = ""
 
+    traffic_text = traffic_summary_text(traffic) if traffic and user.is_active else ""
     return (
         "👤 <b>Моя подписка</b>\n\n"
         f"Статус: <b>{status}</b>\n"
         f"Дата окончания: <b>{until}</b>{days_line}\n\n"
+        f"{traffic_text}"
         f"Telegram ID: <code>{user.telegram_id}</code>"
     )
 
 
 def cabinet(user: User) -> str:
     return profile_card(user)
+
+
+def traffic_summary_text(traffic: TrafficSummary) -> str:
+    if traffic.total_bytes > 0:
+        remaining = format_gigabytes(traffic.remaining_bytes)
+        total = format_gigabytes(traffic.total_bytes)
+        used = format_gigabytes(traffic.used_bytes)
+        limit_line = f"Остаток трафика: <b>{remaining} из {total}</b>\n"
+        used_line = f"Использовано: <b>{used}</b>\n"
+    else:
+        limit_line = "Остаток трафика: <b>без лимита</b>\n"
+        used_line = f"Использовано: <b>{format_gigabytes(traffic.used_bytes)}</b>\n"
+
+    return (
+        f"{limit_line}"
+        f"{used_line}"
+        f"Сброс трафика: <b>{format_date(traffic.next_reset_at)}</b>\n"
+    )
 
 
 def connection_text(user: User, config: Config) -> str:
@@ -197,6 +218,13 @@ def format_dt(value) -> str:
 def format_date(value) -> str:
     local = value.astimezone(UTC)
     return local.strftime("%d.%m.%Y")
+
+
+def format_gigabytes(value: int) -> str:
+    gib = max(0, value) / (1024 ** 3)
+    if gib >= 10 or gib.is_integer():
+        return f"{gib:.0f} ГБ"
+    return f"{gib:.1f} ГБ"
 
 
 def remaining_days_text(until: datetime) -> str:
